@@ -1,0 +1,8 @@
+zones:
+  - edgedns.rocks
+  - edgedns.zone
+
+edgerc_path: /home/elynes/.edgerc
+
+edgerc_section: default
+
