@@ -1,3 +1,16 @@
+// Copyright 2020 Akamai Technologies, Inc.
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -97,12 +110,12 @@ func TestValidateZone(t *testing.T) {
 		HeaderPresent("Authorization").
 		Reply(200).
 		SetHeader("Content-Type", "application/json;charset=UTF-8").
-		BodyString(fmt.Sprintf(`{
+		BodyString(`{
     			"zone": "testzone.com",
     			"type": "PRIMARY",
     			"comment": "This is a test zone",
     			"signAndServe": false
-		}`))
+		}`)
 
 	edgegridConfig = config
 	dns.Init(config)
@@ -123,7 +136,7 @@ func TestValidateZone_Bad(t *testing.T) {
 		HeaderPresent("Authorization").
 		Reply(404).
 		SetHeader("Content-Type", "application/json;charset=UTF-8").
-		BodyString(fmt.Sprintf(`Not Found`))
+		BodyString(`Not Found`)
 
 	edgegridConfig = config
 	dns.Init(config)
@@ -187,12 +200,12 @@ func TestGetTrafficReport(t *testing.T) {
 		HeaderPresent("Authorization").
 		Reply(200).
 		SetHeader("Content-Type", "text/csv").
-		BodyString(fmt.Sprintf(`
+		BodyString(`
 START DATE/TIME, ALL DNS HITS, NXDOMAIN HITS
 09/09/2013 00:00 GMT,9199,145
 09/09/2013 00:05 GMT,8888,100
 09/09/2013 00:10 GMT,7929,20
-09/09/2013 00:15 GMT,9433,157`))
+09/09/2013 00:15 GMT,9433,157`)
 
 	edgegridConfig = config
 	dns.Init(config)
@@ -218,7 +231,7 @@ func TestGetTrafficReport_BadArg(t *testing.T) {
 		HeaderPresent("Authorization").
 		Reply(500).
 		SetHeader("Content-Type", "application/json;charset=UTF-8").
-		BodyString(fmt.Sprintf(`Server Error`))
+		BodyString(`Server Error`)
 
 	edgegridConfig = config
 	dns.Init(config)

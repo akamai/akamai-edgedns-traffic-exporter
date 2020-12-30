@@ -30,22 +30,22 @@ const (
 )
 
 var (
-	// edgegridConfig contains the Akamai OPEN Edgegrid API credentials
-	// for automatic signing of requests
+	// edgegridConfig contains the Akamai OPEN Edgegrid API credentials for automatic signing of requests
 	edgegridConfig edgegrid.Config = edgegrid.Config{}
-	testflag       bool            = false
+	// testflag is used for test automation only
+	testflag bool = false
 )
 
 // Traffic Report Query args struct
 type TrafficReportQueryArgs struct {
 	// required
-	End        string `json:"end"`        // yyyymmdd format
-	End_Time   string `json:"end_time"`   // HH:mm format
-	Start      string `json:"start"`      // yyyymmdd format
-	Start_Time string `json:"start_time"` // HH:mm format
+	End       string `json:"end"`        // yyyymmdd format
+	EndTime   string `json:"end_time"`   // HH:mm format
+	Start     string `json:"start"`      // yyyymmdd format
+	StartTime string `json:"start_time"` // HH:mm format
 	// optional
-	Include_Estimates bool   `json:"include_estimates"`
-	Time_Zone         string `json:"time_zone, omitempty"` //
+	IncludeEstimates bool   `json:"include_estimates"`
+	TimeZone         string `json:"time_zone,omitempty"` //
 }
 
 type TrafficRecordsResponse [][]string
@@ -61,18 +61,27 @@ type TrafficRecordList struct {
 }
 
 // Init edgegrid Config
-func EdgegridInit(edgerc_path, section string) error {
+func EdgegridInit(edgercpath, section string) error {
 
-	config, err := edgegrid.Init(edgerc_path, section)
+	config, err := edgegrid.Init(edgercpath, section)
 	if err != nil {
 		return fmt.Errorf("Edgegrid initialization failed. Error: %s", err.Error())
 	}
+
+	return edgeInit(config)
+}
+
+// Finish edgegrid init
+func edgeInit(config edgegrid.Config) error {
+
 	edgegridConfig = config
 	dns.Init(config)
 
 	return nil
+
 }
 
+// validate date in form yyyymmdd and < current date
 func validateTrafficDate(tdate string) error {
 
 	invalidDateErr := fmt.Errorf("Date %s is invalid", tdate)
@@ -106,6 +115,7 @@ func validateTrafficDate(tdate string) error {
 	return nil
 }
 
+// validate time is of format hh:mm and within valid range.
 func validateTrafficTime(ttime string) error {
 
 	invalidTimeErr := fmt.Errorf("Time %s is invalid", ttime)
@@ -113,13 +123,12 @@ func validateTrafficTime(ttime string) error {
 	if len(tt) != 2 {
 		return invalidTimeErr
 	}
-	t := time.Now()
 	thr, err := strconv.Atoi(tt[0])
-	if err != nil || thr > int(t.Hour()) {
+	if err != nil || thr > 23 { //> int(t.Hour()) {
 		return invalidTimeErr
 	}
 	tmin, err := strconv.Atoi(tt[1])
-	if err != nil || tmin > int(t.Minute()) {
+	if err != nil || tmin > 59 { //> int(t.Minute()) {
 		return invalidTimeErr
 	}
 
@@ -130,6 +139,7 @@ func validateTrafficTime(ttime string) error {
 // see if zone exists
 func validateZone(zone string) error {
 
+	// don't want to do GetZone if testing
 	if testflag {
 		return nil
 	}
@@ -143,24 +153,25 @@ func validateZone(zone string) error {
 	return nil
 }
 
-func NewTrafficReportQueryArgs(end, end_time, start, start_time string) *TrafficReportQueryArgs {
-	trafficqueryargs := &TrafficReportQueryArgs{End: end, End_Time: end_time, Start: start, Start_Time: start_time}
+// Create and return new TrafficReportQueryArgs object
+func NewTrafficReportQueryArgs(end, endtime, start, starttime string) *TrafficReportQueryArgs {
+	trafficqueryargs := &TrafficReportQueryArgs{End: end, EndTime: endtime, Start: start, StartTime: starttime}
 	return trafficqueryargs
 }
 
 // Create QueryArgs from provided start and end time
-func CreateQueryArgs(starttime, endtime time.Time) *TrafficReportQueryArgs {
+func CreateQueryArgs(startTime, endTime time.Time) *TrafficReportQueryArgs {
 
-	e := endtime.UTC().Format(time.RFC3339) // "2006-01-02T15:04:05Z07:00"
+	e := endTime.UTC().Format(time.RFC3339) // "2006-01-02T15:04:05Z07:00"
 	parts := strings.Split(e, "T")
 	end := strings.Join(strings.Split(parts[0], "-"), "")
-	end_time := parts[1][0:5]
-	s := starttime.UTC().Format(time.RFC3339) // "2006-01-02T15:04:05Z07:00"
+	endtime := parts[1][0:5]
+	s := startTime.UTC().Format(time.RFC3339) // "2006-01-02T15:04:05Z07:00"
 	parts = strings.Split(s, "T")
 	start := strings.Join(strings.Split(parts[0], "-"), "")
-	start_time := parts[1][0:5]
+	starttime := parts[1][0:5]
 
-	return NewTrafficReportQueryArgs(end, end_time, start, start_time)
+	return NewTrafficReportQueryArgs(end, endtime, start, starttime)
 
 }
 
@@ -179,6 +190,7 @@ func ConvertTrafficIntervalTime(intervaltime string) (time.Time, error) {
 
 }
 
+// Convert TrafficRecord object to string slice
 func ConvertTrafficRecordSlice(trslice []string) (TrafficRecord, error) {
 
 	trafficRecord := TrafficRecord{}
@@ -234,7 +246,7 @@ func GetTrafficReport(zone string, trafficReportQueryArgs *TrafficReportQueryArg
 
 	// construct GET url
 	getURL := fmt.Sprintf("/data-dns/v1/traffic/%s", zone)
-	if trafficReportQueryArgs.End == "" || trafficReportQueryArgs.Start == "" || trafficReportQueryArgs.End_Time == "" || trafficReportQueryArgs.Start_Time == "" {
+	if trafficReportQueryArgs.End == "" || trafficReportQueryArgs.Start == "" || trafficReportQueryArgs.EndTime == "" || trafficReportQueryArgs.StartTime == "" {
 		return nil, fmt.Errorf("Required GetTrafficReport Query Args missing")
 	}
 	req, err := client.NewRequest(
@@ -250,12 +262,12 @@ func GetTrafficReport(zone string, trafficReportQueryArgs *TrafficReportQueryArg
 
 	q := req.URL.Query()
 	q.Add("end", trafficReportQueryArgs.End)
-	q.Add("end_time", trafficReportQueryArgs.End_Time)
+	q.Add("end_time", trafficReportQueryArgs.EndTime)
 	q.Add("start", trafficReportQueryArgs.Start)
-	q.Add("start_time", trafficReportQueryArgs.Start_Time)
-	q.Add("include_estimates", strconv.FormatBool(trafficReportQueryArgs.Include_Estimates))
-	if trafficReportQueryArgs.Time_Zone != "" {
-		q.Add("time_zone", trafficReportQueryArgs.Time_Zone)
+	q.Add("start_time", trafficReportQueryArgs.StartTime)
+	q.Add("include_estimates", strconv.FormatBool(trafficReportQueryArgs.IncludeEstimates))
+	if trafficReportQueryArgs.TimeZone != "" {
+		q.Add("time_zone", trafficReportQueryArgs.TimeZone)
 	}
 	req.URL.RawQuery = q.Encode()
 

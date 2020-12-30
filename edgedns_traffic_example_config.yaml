@@ -1,8 +1,9 @@
 zones:
-  - edgedns.rocks
+  #- edgedns.rocks
   - edgedns.zone
 
 edgerc_path: /home/elynes/.edgerc
 
 edgerc_section: default
 
+summary_window: 8h 
