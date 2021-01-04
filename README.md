@@ -1,6 +1,6 @@
 # akamai-edgedns-traffic-exporter
 
-Prometheus exporter exposing Akamai Edge DNS [Traffic Report](https://developer.akamai.com/api/cloud_security/edge_dns_traffic_reporting/v1.html) status as `up` metrics.
+The Edge DNS Prometheus Traffic Exportor Technical Preview publishes Akamai Edge DNS [Traffic Report](https://developer.akamai.com/api/cloud_security/edge_dns_traffic_reporting/v1.html) status as `up` metrics. With Edge DNS metrics, Prometheus can track DNS query and NXDOMAIN traffic for zones and trigger alerts such as NXDOMAIN spikes that are 10x the rolling average.
 
 ## Getting Started
 
@@ -20,7 +20,6 @@ Credentials can be provided to the exporter via exporter command line, environme
 Credential locations are searched in the following priority order.
 1. Command line
 2. Environment
-3.
 
 [Akamai API Authentication](https://developer.akamai.com/getting-started/edgegrid) provides an overview and further information pertaining to the generation of auth credentials for API based applications and tools.
 
@@ -93,7 +92,7 @@ Flags:
 `Invoke exporter providing configuration file path and Edgegrid auth credentials`
 
 ```bash
-./akamai-edgedns-traffic-exporter --config.file="/home/example/edgedns.yml" akamai-edgedns-traffic-exporter --config.file ./edgedns_example_config.yaml --edgedns.edgegrid-host akab-abcdefghijklmnop-01234567890aaaaa.luna.akamaiapis.net --edgedns.edgegrid-access-token example_provided_access_token --edgedns.edgegrid-client-token example_provided_client_token --edgedns.edgegrid-client-secret example_provided_client_secret
+./akamai-edgedns-traffic-exporter --config.file ./edgedns_example_config.yaml --edgedns.edgegrid-host akab-abcdefghijklmnop-01234567890aaaaa.luna.akamaiapis.net --edgedns.edgegrid-access-token example_provided_access_token --edgedns.edgegrid-client-token example_provided_client_token --edgedns.edgegrid-client-secret example_provided_client_secret
 ```
 
 `Invoke exporter providing configuration file path and instructing to include timestamp in metrics`
@@ -122,11 +121,12 @@ An example can be found in
 [./edgedns_traffic_example_config.yaml](https://github.com/akamai/akamai-edgedns-traffic-exporter/blob/master/edgedns_traffic_example_config.yaml).
 
 
-| Configuration element | Description |
-| zones | (Required) Akamai Edge DNS zones to collect traffic metrics from |
-| edgerc_path | (Optional) Accessible path to Edgegrid credentials file, e.g /home/test/.edgerc |
-| edgerc_section | (Optional) Section in Edgegrid credentials file containing credentials |
-| summary_window | (Optional) Rolling window for summary and metric data in mins, hours, days. Default: 1 day |
+Configuration element | Description
+--------------------- | -----------
+zones | (Required) Akamai Edge DNS zones to collect traffic metrics from
+edgerc_path | (Optional) Accessible path to Edgegrid credentials file, e.g /home/test/.edgerc
+edgerc_section | (Optional) Section in Edgegrid credentials file containing credentials
+summary_window | (Optional) Rolling window for summary and metric data in mins, hours, days. Default: 1 day
 
 ## Docker image
 
@@ -148,6 +148,8 @@ docker run -p 9613:9613 -v /path/on/host/config/config.yml:/opt/azure-health-exp
 ```
 
 ## Exposed metrics
+
+The Edge DNS Exporter pulls traffic data and makes it available to Prometheus as metrics. Given the volume of data, the Edge DNS API lags in time whereas Prometheus lives in the present. The exporter mitigates this timing by filling past datapoints as current datapoints. Given a scraping schedule, Edge DNS may not have a new datapoint available. In this scenario, gaps can exist in the Prometheus Graph.
 
 Metric | Description
 ------ | -----------
@@ -178,9 +180,29 @@ azure_resource_health_ratelimit_remaining_requests{subscription_id="xxx"} 98
 
 ...
 
+## Troubleshooting
+
+Make sure the scrape interval and timeout levels are set to at least 30s.
+
+```
+scrape_interval: 30s # By default, scrape targets every 15 seconds.
+scrape_timeout: 30s
+```
+
+If using a docker image for the Edge DNS exporter, Prometheus will need to explicitly reference the target appropriately.
+
+```
+    static_configs:
+      - targets: ['docker.for.mac.localhost:9999']
+```
+
+## Future Work
+
+* The Akamai Edge DNS Traffic Report](https://developer.akamai.com/api/cloud_security/edge_dns_traffic_reporting/v1.html) API provides historical DNS query and NXDOMAIN traffic. Additional backfill time series improvements will allow loading Edge DNS past data.
+
 ## Contributing
 
-TBD
+Many thanks to [Ed Lynes](https://github.com/edglynes).
 
 ## License
 
