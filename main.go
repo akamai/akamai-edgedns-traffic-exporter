@@ -41,28 +41,18 @@ const (
 	HoursInDay = 24
 	//DaysInWeek            = 7
 	trafficReportInterval = 5 // mins
-	lookbackDefaultDays   = 5
+	lookbackDefaultDays   = 1
 	//intervalsPerDay       = (MinsInHour / trafficReportInterval) * HoursInDay
 )
 
 var (
-	configFile       = kingpin.Flag("config.file", "Edge DNS Traffic exporter configuration file.").Default("edgedns.yml").String()
+	configFile       = kingpin.Flag("config.file", "Edge DNS Traffic exporter configuration file. Default: ./edgedns.yml").Default("./edgedns.yml").String()
 	listenAddress    = kingpin.Flag("web.listen-address", "The address to listen on for HTTP requests.").Default(defaultlistenaddress).String()
-	ignoreTimestamps = kingpin.Flag("edgedns.ignore-timestamps", "Flag to ignore original timestamp when saving metrics.").Default("true").Bool()
-	// TODO: Does Listing zones make sense???
-	//listZones     = kingpin.Flag("list.zones", "List available Edge DNS zones and exit.").Bool()
-	// TODO: Override config?
-	//zone			= kingpin.Flag("edgedns.zone", "The Edge DNS zone to retrieve traffic reports from.").String()
-	// TODO: Expose start[time]? How factor into lookback and purge?
-	//start                  	= kingpin.Flag("edgedns.start", "The start date <yyyymmdd> for the traffic reports.").String()
-	//start_time             	= kingpin.Flag("edgedns.start-time", "The start time <hh:mm> for the traffic reports.").String()
+	ignoreTimestamps = kingpin.Flag("edgedns.ignore-timestamps", "Flag to ignore original timestamp when saving metrics. Default: true").Default("true").Bool()
 	edgegridHost         = kingpin.Flag("edgedns.edgegrid-host", "The Akamai Edgegrid host auth credential.").String()
 	edgegridClientSecret = kingpin.Flag("edgedns.edgegrid-client-secret", "The Akamai Edgegrid client_secret credential.").String()
 	edgegridClientToken  = kingpin.Flag("edgedns.edgegrid-client-token", "The Akamai Edgegrid client_token credential.").String()
 	edgegridAccessToken  = kingpin.Flag("edgedns.edgegrid-access-token", "The Akamai Edgegrid access_token credential.").String()
-	// TODO: Do the following make sense?
-	//end		        = kingpin.Flag("edgedns.end", "The end date <yyyymmdd> for the traffic reports.").String()
-	//end_time		= kingpin.Flag("edgedns.end-time", "The end time <hh:mm> for the traffic reports.").String()
 	//include_estimates	= kingpin.Flag("edgedns.end-time", "Flag to include estimates in traffic reports.").Bool()
 	//time_zone		= kingpin.Flag("edgedns.time-zone", "The timezone to use for start and end time.").String()
 

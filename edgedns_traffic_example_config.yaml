@@ -1,8 +1,7 @@
 zones:
-  #- edgedns.rocks
-  - edgedns.zone
+  - example.zone
 
-edgerc_path: /home/elynes/.edgerc
+edgerc_path: /home/testuser/.edgerc
 
 edgerc_section: default
 
