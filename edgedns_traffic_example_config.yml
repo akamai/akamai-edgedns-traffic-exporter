@@ -1,0 +1,14 @@
+zones:
+  - example.zone
+
+edgerc_path: /home/testuser/.edgerc
+
+edgerc_section: default
+
+summary_window: 8h              # mins, hours, days
+
+timestamp_label: false          # Creates time series with traffic timestamp as label
+
+traffic_timestamp: false        # Create time series with traffic timestamp
+
+

@@ -21,9 +21,9 @@ import (
 
 	kingpin "gopkg.in/alecthomas/kingpin.v2"
 
-	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/edgegrid"
-
 	"fmt"
+	client "github.com/akamai/AkamaiOPEN-edgegrid-golang/client-v1"
+	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/edgegrid"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"net/http"
@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	defaultlistenaddress = ":9999"
+	defaultlistenaddress = ":9801"
 	namespace            = "edgedns_traffic"
 	//MinsInHour            = 60
 	HoursInDay = 24
@@ -46,9 +46,8 @@ const (
 )
 
 var (
-	configFile       = kingpin.Flag("config.file", "Edge DNS Traffic exporter configuration file. Default: ./edgedns.yml").Default("./edgedns.yml").String()
-	listenAddress    = kingpin.Flag("web.listen-address", "The address to listen on for HTTP requests.").Default(defaultlistenaddress).String()
-	ignoreTimestamps = kingpin.Flag("edgedns.ignore-timestamps", "Flag to ignore original timestamp when saving metrics. Default: true").Default("true").Bool()
+	configFile           = kingpin.Flag("config.file", "Edge DNS Traffic exporter configuration file. Default: ./edgedns.yml").Default("edgedns.yml").String()
+	listenAddress        = kingpin.Flag("web.listen-address", "The address to listen on for HTTP requests.").Default(defaultlistenaddress).String()
 	edgegridHost         = kingpin.Flag("edgedns.edgegrid-host", "The Akamai Edgegrid host auth credential.").String()
 	edgegridClientSecret = kingpin.Flag("edgedns.edgegrid-client-secret", "The Akamai Edgegrid client_secret credential.").String()
 	edgegridClientToken  = kingpin.Flag("edgedns.edgegrid-client-token", "The Akamai Edgegrid client_token credential.").String()
@@ -66,7 +65,9 @@ type EdgednsTrafficConfig struct {
 	Zones         []string `yaml:"zones"`
 	EdgercPath    string   `yaml:"edgerc_path"`
 	EdgercSection string   `yaml:"edgerc_section"`
-	SummaryWindow string   `yaml:"summary_window"` // mins, hours, days, [weeks]. Default lookbackDefaultDays
+	SummaryWindow string   `yaml:"summary_window"`    // mins, hours, days, [weeks]. Default lookbackDefaultDays
+	TSLabel       bool     `yaml:"timestamp_label"`   // Creates time series with traffic timestamp as label
+	UseTimestamp  bool     `yaml:"traffic_timestamp"` // Create time series with traffic timestamp
 }
 
 type EdgednsTrafficExporter struct {
@@ -82,13 +83,11 @@ func NewEdgednsTrafficExporter(edgednsConfig EdgednsTrafficConfig, lastTimestamp
 }
 
 // Metric Definitions
-/*
-var dnsHitsMetric = prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "dns_hits_per_interval"), "Number of DNS hits per 5 minute interval (per zone)", []string{"zone"}, nil)
-var nxdomainHitsMetric = prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "nxdomain_hits_per_interval"), "Number of NXDomain hits per 5 minute interval (per zone)", []string{"zone"}, nil)
-*/
 // Summaries map by zone
 var dnsSummaryMap map[string]prometheus.Summary = make(map[string]prometheus.Summary)
 var nxdSummaryMap map[string]prometheus.Summary = make(map[string]prometheus.Summary)
+
+// Interval Hits map by zone
 var dnsHitsMap map[string][]int64 = make(map[string][]int64)
 var nxdHitsMap map[string][]int64 = make(map[string][]int64)
 var hitsMapCap int
@@ -196,6 +195,7 @@ func calcSummaryWindowDuration(window string) error {
 // Describe function
 func (e *EdgednsTrafficExporter) Describe(ch chan<- *prometheus.Desc) {
 
+	ch <- prometheus.NewDesc("akamai_edgedns", "Akamai Edgedns", nil, nil)
 }
 
 // Collect function
@@ -217,6 +217,11 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 		log.Debugf("Fetching Report for zone %s. Args: [%v}", zone, qargs)
 		zoneTrafficReport, err := GetTrafficReport(zone, qargs)
 		if err != nil {
+			apierr, ok := err.(client.APIError)
+			if ok && apierr.Status == 500 {
+				log.Warnf("Unable to get traffic report for zone %s. Internal error ... Skipping.", zone)
+				continue
+			}
 			log.Errorf("Unable to get traffic report for zone %s ... Skipping. Error: %s", zone, err.Error())
 			continue
 		}
@@ -266,26 +271,40 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 			}
 			dnsHitsMap[zone] = append(dnsHitsMap[zone], reportInstance.DNSHits)
 			nxdHitsMap[zone] = append(nxdHitsMap[zone], reportInstance.NXDHits)
-
+			// Check if preserving report instance timestamp as a label
+			var ts_labels = []string{"zone"}
+			if e.TrafficExporterConfig.TSLabel {
+				ts_labels = append(ts_labels, "interval_timestamp")
+			}
 			// DNS Hits
 			ts := reportInstance.Timestamp.Format(time.RFC3339)
-			desc := prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "dns_hits_per_interval"), "Number of DNS hits per 5 minute interval (per zone)", []string{"zone"}, nil)
+			desc := prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "dns_hits_per_interval"), "Number of DNS hits per 5 minute interval (per zone)", ts_labels, nil)
 			log.Debugf("Creating DNS metric. Zone: %s, Hits: %v, Timestamp: %v", zone, reportInstance.DNSHits, ts)
-			dnsmetric := prometheus.MustNewConstMetric(
-				desc, prometheus.GaugeValue, float64(reportInstance.DNSHits), zone)
-			//log.Infof("TIMESTAMP: %s", ts)
-			if *ignoreTimestamps {
+			var dnsmetric prometheus.Metric
+			var nxdmetric prometheus.Metric
+			if e.TrafficExporterConfig.TSLabel {
+				dnsmetric = prometheus.MustNewConstMetric(
+					desc, prometheus.GaugeValue, float64(reportInstance.DNSHits), zone, ts)
+			} else {
+				dnsmetric = prometheus.MustNewConstMetric(
+					desc, prometheus.GaugeValue, float64(reportInstance.DNSHits), zone)
+			}
+			if !e.TrafficExporterConfig.UseTimestamp {
 				ch <- dnsmetric
 			} else {
 				ch <- prometheus.NewMetricWithTimestamp(reportInstance.Timestamp, dnsmetric)
 			}
 			// NXD Hits
-			desc = prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "nxd_hits_per_interval"), "Number of NXD hits per 5 minute interval (per zone)", []string{"zone"}, nil)
+			desc = prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "nxd_hits_per_interval"), "Number of NXD hits per 5 minute interval (per zone)", ts_labels, nil)
 			log.Debugf("Creating NXD metric. Zone: %s, Hits: %v, Timestamp: %v", zone, reportInstance.NXDHits, ts)
-			nxdmetric := prometheus.MustNewConstMetric(
-				desc, prometheus.GaugeValue, float64(reportInstance.NXDHits), zone)
-			//log.Infof("TIMESTAMP: %s", ts)
-			if *ignoreTimestamps {
+			if e.TrafficExporterConfig.TSLabel {
+				nxdmetric = prometheus.MustNewConstMetric(
+					desc, prometheus.GaugeValue, float64(reportInstance.NXDHits), zone, ts)
+			} else {
+				nxdmetric = prometheus.MustNewConstMetric(
+					desc, prometheus.GaugeValue, float64(reportInstance.NXDHits), zone)
+			}
+			if !e.TrafficExporterConfig.UseTimestamp {
 				ch <- nxdmetric
 			} else {
 				ch <- prometheus.NewMetricWithTimestamp(reportInstance.Timestamp, nxdmetric)
@@ -311,6 +330,7 @@ func init() {
 
 func main() {
 
+	log.AddFlags(kingpin.CommandLine)
 	kingpin.Version(version.Print("akamai_edgedns_traffic_exporter"))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()

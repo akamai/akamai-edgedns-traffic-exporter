@@ -70,7 +70,7 @@ unused:
 .PHONY: test-docker
 test-docker:
 	@echo ">> testing docker image"
-	./test_image.sh "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-amd64:$(DOCKER_IMAGE_TAG)" 9100
+	./test_image.sh "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-amd64:$(DOCKER_IMAGE_TAG)" 9801
 
 .PHONY: promtool
 promtool: $(PROMTOOL)

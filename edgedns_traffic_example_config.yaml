@@ -1,8 +1,0 @@
-zones:
-  - example.zone
-
-edgerc_path: /home/testuser/.edgerc
-
-edgerc_section: default
-
-summary_window: 8h 

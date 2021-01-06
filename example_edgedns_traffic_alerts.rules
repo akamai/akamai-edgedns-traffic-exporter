@@ -1,0 +1,24 @@
+# Edge DNS Traffic Example Rules definition
+# This example defines the recording rules and alert rules grouping
+# to detect if the the NXD hits in an interval exceed the rolling average times 10.
+groups:
+  - name: edgedns_nxd_example_zone
+    rules:
+      - record: instance_zone:edgedns_traffic_nxd_hits_per_interval:max1m
+        # zone must be literal. Can't template expressions
+        expr: max_over_time(edgedns_traffic_nxd_hits_per_interval{zone="example.zone"}[1m])
+      - record: instance_zone:edgedns_traffic_nxd_hits_per_interval_summary:mean
+        expr: |2
+            edgedns_traffic_nxd_hits_per_interval_summary_sum{zone="example.zone"}
+          / 
+            edgedns_traffic_dns_hits_per_interval_summary_count{zone="example.zone"}
+      - record: instance_zone:edgedns_traffic_nxd_hits_per_interval_summary:sub_mean
+        expr: (instance_zone:edgedns_traffic_nxd_hits_per_interval:max1m - instance_zone:edgedns_traffic_nxd_hits_per_interval_summary:mean*10) 
+      - alert: NXDHitsOutOfBounds
+        expr: instance_zone:edgedns_traffic_nxd_hits_per_interval_summary:sub_mean >= 0 
+        labels:
+          zone: "example.zone"
+          severity: critical
+        annotations:
+          summary: "NXD Hits Exceeded Rolling average * 10"
+          description: "Job: {{ $labels.job }} Instance: {{ $labels.instance }} has NXD interval hit count (current value: {{ $value }}s) compared to rolling average"
