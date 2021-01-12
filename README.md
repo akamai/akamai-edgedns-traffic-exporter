@@ -232,7 +232,7 @@ The exporter provides advanced configuration options that enable the inclusion o
 
 Adding a timestamp label to each metric time series has the side effect of creating a distinct series for each label/timestamp combination. When retreiving metrics, it is recommended to use only the zone label in the query expression. The legend displayed when viewing graphs through the Prometheus portal will contain all generated series; 288 per day. Other viewing applications, e.g. Grafana, will allow graph customization and reduced screen clutter. 
 
-The table tab in the Prometheus portal may provide a more manageable means to view metrics with a timestamp label. For example by only retriving the last 5 minutes of collected metrics: `edgedns_traffic_nxd_hits_per_interval{zone="example.com"}[5m]`
+The table tab in the Prometheus portal may provide a more manageable means to view metrics with a timestamp label. For example by only retrieving the last 5 minutes of collected metrics: `edgedns_traffic_nxd_hits_per_interval{zone="example.com"}[5m]`
 
 #### `traffic_timestamp` Behavior Notes
 
