@@ -272,13 +272,13 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 			dnsHitsMap[zone] = append(dnsHitsMap[zone], reportInstance.DNSHits)
 			nxdHitsMap[zone] = append(nxdHitsMap[zone], reportInstance.NXDHits)
 			// Check if preserving report instance timestamp as a label
-			var ts_labels = []string{"zone"}
+			var tsLabels = []string{"zone"}
 			if e.TrafficExporterConfig.TSLabel {
-				ts_labels = append(ts_labels, "interval_timestamp")
+				tsLabels = append(tsLabels, "interval_timestamp")
 			}
 			// DNS Hits
 			ts := reportInstance.Timestamp.Format(time.RFC3339)
-			desc := prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "dns_hits_per_interval"), "Number of DNS hits per 5 minute interval (per zone)", ts_labels, nil)
+			desc := prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "dns_hits_per_interval"), "Number of DNS hits per 5 minute interval (per zone)", tsLabels, nil)
 			log.Debugf("Creating DNS metric. Zone: %s, Hits: %v, Timestamp: %v", zone, reportInstance.DNSHits, ts)
 			var dnsmetric prometheus.Metric
 			var nxdmetric prometheus.Metric
@@ -295,7 +295,7 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 				ch <- prometheus.NewMetricWithTimestamp(reportInstance.Timestamp, dnsmetric)
 			}
 			// NXD Hits
-			desc = prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "nxd_hits_per_interval"), "Number of NXD hits per 5 minute interval (per zone)", ts_labels, nil)
+			desc = prometheus.NewDesc(prometheus.BuildFQName(namespace, "", "nxd_hits_per_interval"), "Number of NXD hits per 5 minute interval (per zone)", tsLabels, nil)
 			log.Debugf("Creating NXD metric. Zone: %s, Hits: %v, Timestamp: %v", zone, reportInstance.NXDHits, ts)
 			if e.TrafficExporterConfig.TSLabel {
 				nxdmetric = prometheus.MustNewConstMetric(

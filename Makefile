@@ -62,15 +62,12 @@ $(eval $(call goarch_pair,amd64,386))
 $(eval $(call goarch_pair,mips64,mips))
 $(eval $(call goarch_pair,mips64el,mipsel))
 
-all:: common-all
+.PHONY: all
+all:: precheck style check_license lint build
 
-.PHONY: test-docker
+.PHONY: unused
 unused: 
 	@echo ">> skipping unused check. known Go compiler issue"
-.PHONY: test-docker
-test-docker:
-	@echo ">> testing docker image"
-	./test_image.sh "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-amd64:$(DOCKER_IMAGE_TAG)" 9801
 
 .PHONY: promtool
 promtool: $(PROMTOOL)
