@@ -211,8 +211,11 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 
 		log.Debugf("Processing zone %s", zone)
 
-		// get last timestamp recorded. bump a minute.
-		lasttime := e.LastTimestamp[zone].Add(time.Minute * 1)
+		// get last timestamp recorded. bump a minute. Make sure at least 5 minutes
+		lasttime := e.LastTimestamp[zone].Add(time.Minute)
+		if endtime.Before(lasttime.Add(time.Minute * 5)) {
+			lasttime = lasttime.Add(time.Minute * 5)
+		}
 		qargs := CreateQueryArgs(lasttime, endtime)
 		log.Debugf("Fetching Report for zone %s. Args: [%v}", zone, qargs)
 		zoneTrafficReport, err := GetTrafficReport(zone, qargs)
