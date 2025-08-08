@@ -14,14 +14,22 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
+	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
-	"github.com/akamai/AkamaiOPEN-edgegrid-golang/client-v1"
-	dns "github.com/akamai/AkamaiOPEN-edgegrid-golang/configdns-v2"
-	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/edgegrid"
+	"io"
+	"log"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	dns "github.com/akamai/AkamaiOPEN-edgegrid-golang/v11/pkg/dns"
+	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v11/pkg/edgegrid"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v11/pkg/session"
 )
 
 const (
@@ -31,13 +39,25 @@ const (
 
 var (
 	// edgegridConfig contains the Akamai OPEN Edgegrid API credentials for automatic signing of requests
-	edgegridConfig edgegrid.Config = edgegrid.Config{}
+	//edgegridConfig edgegrid.Config = edgegrid.Config{}
 	// testflag is used for test automation only
 	testflag bool = false
 )
 
+type Interval string
+
+const (
+	FIVE_MINUTES Interval = "FIVE_MINUTES"
+	HOUR         Interval = "HOUR"
+)
+
+type AkamaiClient struct {
+	DNSClient dns.DNS
+	Session   session.Session
+}
+
 // Traffic Report Query args struct
-type TrafficReportQueryArgs struct {
+/*type TrafficReportQueryArgs struct {
 	// required
 	End       string `json:"end"`        // yyyymmdd format
 	EndTime   string `json:"end_time"`   // HH:mm format
@@ -46,6 +66,14 @@ type TrafficReportQueryArgs struct {
 	// optional
 	IncludeEstimates bool   `json:"include_estimates"`
 	TimeZone         string `json:"time_zone,omitempty"` //
+}*/
+
+type TrafficReportQueryArgs struct {
+	StartTime        time.Time `json:"start_time"` // RFC3339 / ISO 8601
+	EndTime          time.Time `json:"end_time"`   // RFC3339 / ISO 8601
+	IncludeEstimates bool      `json:"include_estimates,omitempty"`
+	TimeZone         string    `json:"time_zone,omitempty"`
+	Interval         Interval  `json:"interval,omitempty"`
 }
 
 type TrafficRecordsResponse [][]string
@@ -61,55 +89,57 @@ type TrafficRecordList struct {
 }
 
 // Init edgegrid Config
-func EdgegridInit(edgercpath, section string) error {
+func EdgegridInit(edgercpath, section string) (*edgegrid.Config, error) {
 
-	config, err := edgegrid.Init(edgercpath, section)
+	config, err := edgegrid.New(
+		edgegrid.WithFile(edgercpath),
+		edgegrid.WithSection(section),
+	)
 	if err != nil {
-		return fmt.Errorf("Edgegrid initialization failed. Error: %s", err.Error())
+		return nil, fmt.Errorf("edgegrid initialization failed. Error: %s", err.Error())
 	}
 
-	return edgeInit(config)
+	return config, nil
 }
 
-// Finish edgegrid init
-func edgeInit(config edgegrid.Config) error {
+// CreateDNSClient creates a DNS client from Edgegrid config and returns it
+func CreateDNSClient(config *edgegrid.Config) (dns.DNS, session.Session, error) {
+	sess, err := session.New(
+		session.WithSigner(config),
+		session.WithHTTPTracing(false),
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create EdgeGrid session: %w", err)
+	}
 
-	edgegridConfig = config
-	dns.Init(config)
-
-	return nil
-
+	return dns.Client(sess), sess, nil
 }
 
 // validate date in form yyyymmdd and < current date
-func validateTrafficDate(tdate string) error {
-
-	invalidDateErr := fmt.Errorf("Date %s is invalid", tdate)
+/*func validateTrafficDate(tdate string) error {
 	if len(tdate) != 8 {
-		return invalidDateErr
+		return fmt.Errorf("date %s is invalid", tdate)
 	}
-	currentTime := time.Now()
-	tyear, err := strconv.Atoi(tdate[0:4])
-	if err != nil {
-		return invalidDateErr
-	}
-	tmonth, err := strconv.Atoi(tdate[4:6])
-	if err != nil {
-		return invalidDateErr
-	}
-	tday, err := strconv.Atoi(tdate[6:8])
-	if err != nil {
-		return invalidDateErr
+	_, err := time.Parse("20060102", tdate)
+	return err
+}*/
+
+func validateTrafficDate(tdate string) error {
+	if len(tdate) != 8 {
+		return fmt.Errorf("date %s is invalid length", tdate)
 	}
 
-	if tyear > int(currentTime.Year()) {
-		return fmt.Errorf("Date year %s is invalid", tdate)
+	parsedDate, err := time.Parse("20060102", tdate)
+	if err != nil {
+		return fmt.Errorf("date %s is invalid format", tdate)
 	}
-	if tmonth > 12 || (tyear == int(currentTime.Year()) && tmonth > int(currentTime.Month())) {
-		return fmt.Errorf("Date month %s is invalid", tdate)
-	}
-	if tday > 31 || (tyear == int(currentTime.Year()) && tmonth == int(currentTime.Month()) && tday > int(currentTime.Day())) {
-		return fmt.Errorf("Date day %s is invalid", tdate)
+
+	// Compare with current date (ignore time)
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	if !parsedDate.Before(today) {
+		return fmt.Errorf("date %s is not before today", tdate)
 	}
 
 	return nil
@@ -117,150 +147,211 @@ func validateTrafficDate(tdate string) error {
 
 // validate time is of format hh:mm and within valid range.
 func validateTrafficTime(ttime string) error {
-
-	invalidTimeErr := fmt.Errorf("Time %s is invalid", ttime)
 	tt := strings.Split(ttime, ":")
 	if len(tt) != 2 {
-		return invalidTimeErr
+		return fmt.Errorf("time %s is invalid", ttime)
 	}
-	thr, err := strconv.Atoi(tt[0])
-	if err != nil || thr > 23 { //> int(t.Hour()) {
-		return invalidTimeErr
+	hr, err1 := strconv.Atoi(tt[0])
+	min, err2 := strconv.Atoi(tt[1])
+	if err1 != nil || err2 != nil || hr < 0 || hr > 23 || min < 0 || min > 59 {
+		return fmt.Errorf("time %s is invalid", ttime)
 	}
-	tmin, err := strconv.Atoi(tt[1])
-	if err != nil || tmin > 59 { //> int(t.Minute()) {
-		return invalidTimeErr
-	}
-
 	return nil
-
 }
 
-// see if zone exists
-func validateZone(zone string) error {
+// ValidateZone checks if zone exists using the dns client
+func ValidateZone(ctx context.Context, client dns.DNS, zone string) error {
 
-	// don't want to do GetZone if testing
 	if testflag {
 		return nil
 	}
-	if edgegridConfig.Host == "" {
-		return fmt.Errorf("Edgegrid not initialized")
-	}
-	if _, err := dns.GetZone(zone); err != nil {
-		return err
+
+	if client == nil {
+		return fmt.Errorf("dnsClient is not initialized")
 	}
 
-	return nil
+	_, err := client.GetZone(ctx, dns.GetZoneRequest{Zone: zone})
+	return err
 }
 
 // Create and return new TrafficReportQueryArgs object
-func NewTrafficReportQueryArgs(end, endtime, start, starttime string) *TrafficReportQueryArgs {
-	trafficqueryargs := &TrafficReportQueryArgs{End: end, EndTime: endtime, Start: start, StartTime: starttime}
-	return trafficqueryargs
+func NewTrafficReportQueryArgs(start, end time.Time) *TrafficReportQueryArgs {
+	return &TrafficReportQueryArgs{
+		StartTime: start.UTC(),
+		EndTime:   end.UTC(),
+	}
 }
 
 // Create QueryArgs from provided start and end time
-func CreateQueryArgs(startTime, endTime time.Time) *TrafficReportQueryArgs {
+/*func CreateQueryArgs(startTime, endTime time.Time) *TrafficReportQueryArgs {
+	e := endTime.UTC().Format(time.RFC3339)
+	s := startTime.UTC().Format(time.RFC3339)
 
-	e := endTime.UTC().Format(time.RFC3339) // "2006-01-02T15:04:05Z07:00"
-	parts := strings.Split(e, "T")
-	end := strings.Join(strings.Split(parts[0], "-"), "")
-	endtime := parts[1][0:5]
-	s := startTime.UTC().Format(time.RFC3339) // "2006-01-02T15:04:05Z07:00"
-	parts = strings.Split(s, "T")
-	start := strings.Join(strings.Split(parts[0], "-"), "")
-	starttime := parts[1][0:5]
+	partsE := strings.Split(e, "T")
+	end := strings.ReplaceAll(partsE[0], "-", "")
+	endtime := partsE[1][:5]
+
+	partsS := strings.Split(s, "T")
+	start := strings.ReplaceAll(partsS[0], "-", "")
+	starttime := partsS[1][:5]
 
 	return NewTrafficReportQueryArgs(end, endtime, start, starttime)
+}*/
 
+func CreateQueryArgs(startTime, endTime time.Time) *TrafficReportQueryArgs {
+	interval := FIVE_MINUTES // You can make this dynamic if needed
+
+	startRounded := floorToInterval(startTime.UTC(), interval)
+	endRounded := ceilToInterval(endTime.UTC(), interval)
+
+	return &TrafficReportQueryArgs{
+		StartTime: startRounded,
+		EndTime:   endRounded,
+		Interval:  interval,
+	}
 }
 
-//  Util function to convert traffic interval time/date to time.Time object
+// Util function to convert traffic interval time/date to time.Time object
 func ConvertTrafficIntervalTime(intervaltime string) (time.Time, error) {
-
-	var ts time.Time
-	var err error
-	if strings.HasSuffix(intervaltime, "GMT") {
-		ts, err = time.Parse(TrafficRecordTimeFormat, intervaltime)
-	} else {
-		ts, err = time.Parse(TrafficRecordTimeOffsetFormat, intervaltime)
+	if ts, err := time.Parse(time.RFC3339, intervaltime); err == nil {
+		return ts, nil
 	}
+	if ts, err := time.Parse(TrafficRecordTimeFormat, intervaltime); err == nil {
+		return ts, nil
+	}
+	if ts, err := time.Parse(TrafficRecordTimeOffsetFormat, intervaltime); err == nil {
+		return ts, nil
+	}
+	return time.Time{}, fmt.Errorf("invalid time format: %s", intervaltime)
+}
 
-	return ts, err
-
+func safeParseInt(s string) (int64, error) {
+	if s == "N/A" || s == "" {
+		return 0, nil
+	}
+	return strconv.ParseInt(s, 10, 64)
 }
 
 // Convert TrafficRecord object to string slice
-func ConvertTrafficRecordSlice(trslice []string) (TrafficRecord, error) {
-
+/*func ConvertTrafficRecordSlice(trslice []string) (TrafficRecord, error) {
 	trafficRecord := TrafficRecord{}
 	if len(trslice) < 3 {
-		return trafficRecord, fmt.Errorf("Traffic record %s length is invalid", trslice)
+		return trafficRecord, fmt.Errorf("invalid record length")
 	}
 	ts, err := ConvertTrafficIntervalTime(trslice[0])
 	if err != nil {
-		return trafficRecord, fmt.Errorf("Traffic record timestamp %s is invalid", trslice)
+		return trafficRecord, err
 	}
 	dnsHits, err := strconv.ParseInt(trslice[1], 10, 64)
 	if err != nil {
-		return trafficRecord, fmt.Errorf("Traffic record DNS Hits %s is invalid", trslice)
+		return trafficRecord, err
 	}
 	nxdHits, err := strconv.ParseInt(trslice[2], 10, 64)
 	if err != nil {
-		return trafficRecord, fmt.Errorf("Traffic record NXD Hits %s is invalid", trslice)
+		return trafficRecord, err
 	}
-	trafficRecord.Timestamp = ts
-	trafficRecord.DNSHits = dnsHits
-	trafficRecord.NXDHits = nxdHits
+	return TrafficRecord{Timestamp: ts, DNSHits: dnsHits, NXDHits: nxdHits}, nil
+}*/
 
-	return trafficRecord, nil
+func ConvertTrafficRecordSlice(trslice []string) (TrafficRecord, error) {
+	trafficRecord := TrafficRecord{}
+	if len(trslice) < 3 {
+		return trafficRecord, fmt.Errorf("invalid record length")
+	}
+	ts, err := ConvertTrafficIntervalTime(trslice[0])
+	if err != nil {
+		return trafficRecord, err
+	}
+	dnsHits, err := safeParseInt(trslice[1])
+	if err != nil {
+		return trafficRecord, err
+	}
+	nxdHits, err := safeParseInt(trslice[2])
+	if err != nil {
+		return trafficRecord, err
+	}
+	return TrafficRecord{Timestamp: ts, DNSHits: dnsHits, NXDHits: nxdHits}, nil
 }
 
 func ConvertTrafficRecordsResponse(recordsresp TrafficRecordsResponse) TrafficRecordList {
-
-	trafficRecordSlices := make([]TrafficRecord, 0)
-	trafficRecordList := TrafficRecordList{TrafficRecords: trafficRecordSlices}
+	trafficRecordList := TrafficRecordList{}
 	for i, rec := range recordsresp {
 		if i == 0 {
-			continue // first line is header
-		}
-		newrec, err := ConvertTrafficRecordSlice(rec)
-		if err != nil {
-			// log
 			continue
 		}
-		trafficRecordSlices = append(trafficRecordSlices, newrec)
+		tr, err := ConvertTrafficRecordSlice(rec)
+		if err != nil {
+			continue
+		}
+		trafficRecordList.TrafficRecords = append(trafficRecordList.TrafficRecords, tr)
 	}
-	trafficRecordList.TrafficRecords = trafficRecordSlices
 	return trafficRecordList
+}
+func prettyPrintJSON(raw []byte) string {
+	var prettyJSON bytes.Buffer
+	err := json.Indent(&prettyJSON, raw, "", "  ")
+	if err != nil {
+		return string(raw)
+	}
+	return prettyJSON.String()
+}
+
+// Rounds DOWN to the nearest interval boundary (e.g., 10:07 → 10:05)
+func floorToInterval(t time.Time, interval Interval) time.Time {
+	switch interval {
+	case FIVE_MINUTES:
+		return t.Truncate(5 * time.Minute)
+	case HOUR:
+		return t.Truncate(time.Hour)
+	default:
+		log.Printf("Unsupported interval: %s", interval)
+		return t
+	}
+}
+
+// Rounds UP to the next interval boundary (e.g., 10:07 → 10:10)
+func ceilToInterval(t time.Time, interval Interval) time.Time {
+	switch interval {
+	case FIVE_MINUTES:
+		if t.Truncate(5 * time.Minute).Equal(t) {
+			return t
+		}
+		return t.Truncate(5 * time.Minute).Add(5 * time.Minute)
+	case HOUR:
+		if t.Truncate(time.Hour).Equal(t) {
+			return t
+		}
+		return t.Truncate(time.Hour).Add(time.Hour)
+	default:
+		log.Printf("Unsupported interval: %s", interval)
+		return t
+	}
 }
 
 // GetTrafficReport retrieves and returns a zone traffic report slice of slices with provided query filters
 // See https://developer.akamai.com/api/cloud_security/edge_dns_traffic_reporting/v1.html#gettrafficreport for detail
-// Example: /data-dns/v1/traffic/example.com?start=20131231&start_time=00:30&end=20140101&end_time=14:30&end_time&time_zone=example.com=GMT–08%3A00&include_estimates=false
-func GetTrafficReport(zone string, trafficReportQueryArgs *TrafficReportQueryArgs) (TrafficRecordsResponse, error) {
+func GetTrafficReport(ctx context.Context, client dns.DNS, sess session.Session, zone string, trafficReportQueryArgs *TrafficReportQueryArgs) (TrafficRecordsResponse, error) {
+	if client == nil {
+		return nil, fmt.Errorf("dnsClient not initialized")
+	}
 
-	if err := validateZone(zone); err != nil {
-		return nil, fmt.Errorf("GetTrafficReport Zone not reachable. %s", err.Error())
+	if err := ValidateZone(ctx, client, zone); err != nil {
+		return nil, fmt.Errorf("zone not reachable: %w", err)
+	}
+
+	if trafficReportQueryArgs.StartTime.IsZero() || trafficReportQueryArgs.EndTime.IsZero() {
+		return nil, fmt.Errorf("start_time or end_time is not set")
 	}
 
 	// construct GET url
-	getURL := fmt.Sprintf("/data-dns/v1/traffic/%s", zone)
-	if trafficReportQueryArgs.End == "" || trafficReportQueryArgs.Start == "" || trafficReportQueryArgs.EndTime == "" || trafficReportQueryArgs.StartTime == "" {
-		return nil, fmt.Errorf("Required GetTrafficReport Query Args missing")
-	}
-	req, err := client.NewRequest(
-		edgegridConfig,
-		"GET",
-		getURL,
-		nil,
-	)
+	// Build the new API URL
+	baseURL := "/reporting-api/v1/reports/authoritative-dns-traffic-by-time/versions/3/report-data"
+	req, err := http.NewRequest(http.MethodGet, baseURL, nil)
 	if err != nil {
-		return TrafficRecordsResponse{}, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Add("Accept", "text/csv")
 
-	q := req.URL.Query()
+	/*q := req.URL.Query()
 	q.Add("end", trafficReportQueryArgs.End)
 	q.Add("end_time", trafficReportQueryArgs.EndTime)
 	q.Add("start", trafficReportQueryArgs.Start)
@@ -269,36 +360,124 @@ func GetTrafficReport(zone string, trafficReportQueryArgs *TrafficReportQueryArg
 	if trafficReportQueryArgs.TimeZone != "" {
 		q.Add("time_zone", trafficReportQueryArgs.TimeZone)
 	}
+	req.URL.RawQuery = q.Encode()*/
+
+	q := req.URL.Query()
+	// Or better, pass full RFC3339 timestamps:
+	q.Add("start", trafficReportQueryArgs.StartTime.Format(time.RFC3339))
+	q.Add("end", trafficReportQueryArgs.EndTime.Format(time.RFC3339))
+
+	q.Add("interval", string(trafficReportQueryArgs.Interval))
+	q.Add("objectIds", zone)
+	//q.Add("metrics", "sum_hits,sum_nxdomain")
+
 	req.URL.RawQuery = q.Encode()
 
-	edgegrid.PrintHttpRequest(req, true)
+	req.Header.Add("Accept", "text/csv")
 
-	res, err := client.Do(edgegridConfig, req)
+	resp, err := sess.Exec(req, nil)
 	if err != nil {
-		return TrafficRecordsResponse{}, err
+		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
+	defer resp.Body.Close()
 
-	edgegrid.PrintHttpResponse(res, true)
-
-	if client.IsError(res) {
-		return TrafficRecordsResponse{}, client.NewAPIError(res)
-	}
-	/*
-		Returned body example:
-
-		START DATE/TIME,ALL DNS HITS,NXDOMAIN HITS
-		09/09/2013 00:00 GMT,9199,145
-		09/09/2013 00:05 GMT,8035,25
-		09/09/2013 00:10 GMT,7929,20
-		09/09/2013 00:15 GMT,9433,157
-	*/
-
-	r := csv.NewReader(res.Body) // bodyBytes)
-	tr, err := r.ReadAll()
+	// Read full response body bytes for logging
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return TrafficRecordsResponse{}, err
+		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
-	var temp interface{} = tr
-	var trafficRecords TrafficRecordsResponse = TrafficRecordsResponse(temp.([][]string))
-	return trafficRecords, nil
+
+	log.Printf("HTTP Response Status: %s", resp.Status)
+	log.Println("=== RAW RESPONSE BODY ===")
+	log.Println(prettyPrintJSON(bodyBytes))
+	log.Println("=== END RAW RESPONSE BODY ===")
+
+	bodyReader := bytes.NewReader(bodyBytes)
+	scanner := bufio.NewScanner(bodyReader)
+
+	// Parse the CSV response (skip metadata/summary blocks)
+	/*r := csv.NewReader(resp.Body)
+	lines, err := r.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read CSV response: %w", err)
+	}
+	// Extract only actual data rows between #DATA_START and #DATA_END
+	var dataRows [][]string
+	inDataBlock := false
+
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+		switch strings.TrimSpace(line[0]) {
+		case "#DATA_START":
+			inDataBlock = true
+		case "#DATA_END":
+			inDataBlock = false
+		default:
+			if inDataBlock {
+				dataRows = append(dataRows, line)
+			}
+		}
+	}
+
+	if len(dataRows) == 0 {
+		return nil, fmt.Errorf("no traffic data found for zone: %s", zone)
+	}
+
+	return TrafficRecordsResponse(dataRows), nil*/
+	// Read response line-by-line, skipping metadata and extracting CSV data only
+	//scanner := bufio.NewScanner(resp.Body)
+
+	var csvLines []string
+	inCSV := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch line {
+		case "#COLUMNS_START", "#DATA_START":
+			inCSV = true
+			continue
+		case "#COLUMNS_END", "#DATA_END":
+			inCSV = false
+			continue
+		}
+
+		if inCSV {
+			csvLines = append(csvLines, line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan response body: %w", err)
+	}
+
+	if len(csvLines) == 0 {
+		return nil, fmt.Errorf("no CSV data found in response")
+	}
+	/* //debug
+	log.Println("=== RAW CSV RESPONSE LINES ===")
+	for _, line := range csvLines {
+		log.Println(line)
+	}
+	log.Println("=== END RAW CSV RESPONSE ===")*/
+
+	// Parse only the CSV lines collected
+	csvReader := csv.NewReader(strings.NewReader(strings.Join(csvLines, "\n")))
+	records, err := csvReader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse CSV data: %w", err)
+	}
+
+	if len(records) < 2 {
+		return nil, fmt.Errorf("not enough CSV rows")
+	}
+
+	// Skip header, return data rows only
+	dataRows := records[1:]
+
+	if len(dataRows) == 0 {
+		return nil, fmt.Errorf("no traffic data rows found")
+	}
+
+	return TrafficRecordsResponse(dataRows), nil
+
 }
