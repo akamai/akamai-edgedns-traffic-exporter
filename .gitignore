@@ -6,3 +6,5 @@ edgedns.yml
 prometheus.yml
 /data
 .edgerc
+.DS_Store
+*.env

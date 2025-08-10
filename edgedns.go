@@ -201,6 +201,18 @@ func NewTrafficReportQueryArgs(start, end time.Time) *TrafficReportQueryArgs {
 func CreateQueryArgs(startTime, endTime time.Time) *TrafficReportQueryArgs {
 	interval := FIVE_MINUTES // You can make this dynamic if needed
 
+	now := time.Now().UTC()
+
+	// Ensure endTime doesn't go into the future
+	if endTime.After(now) {
+		endTime = now
+	}
+
+	// Ensure startTime doesn't go after (adjusted) endTime
+	if startTime.After(endTime) {
+		startTime = endTime.Add(-5 * time.Minute) // Shift start back 1 interval
+	}
+
 	startRounded := floorToInterval(startTime.UTC(), interval)
 	endRounded := ceilToInterval(endTime.UTC(), interval)
 

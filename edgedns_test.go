@@ -16,10 +16,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
-
-	//"github.com/akamai/AkamaiOPEN-edgegrid-golang/jsonhooks-v1"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/h2non/gock.v1"
