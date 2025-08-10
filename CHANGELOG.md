@@ -2,6 +2,7 @@
 * Upgraded the plugin to use Akamai Edgegrid v11
 * Upgraded the plugin to use latest Prometheus Go libraries
 * Upgraded the plugin to use the latest Akamai Reporting API -- [authoritative-dns-traffic-by-time](https://techdocs.akamai.com/reporting/v1/reference/authoritative-dns-traffic-by-time)
+* Added native support for Apple Silicon
 
 
 ## 0.1.0 / 2021-01-31
