@@ -27,9 +27,11 @@ import (
 	"strings"
 	"time"
 
-	dns "github.com/akamai/AkamaiOPEN-edgegrid-golang/v11/pkg/dns"
-	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v11/pkg/edgegrid"
-	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v11/pkg/session"
+	"github.com/sirupsen/logrus"
+
+	dns "github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/dns"
+	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
 )
 
 const (
@@ -38,9 +40,6 @@ const (
 )
 
 var (
-	// edgegridConfig contains the Akamai OPEN Edgegrid API credentials for automatic signing of requests
-	//edgegridConfig edgegrid.Config = edgegrid.Config{}
-	// testflag is used for test automation only
 	testflag bool = false
 )
 
@@ -56,18 +55,6 @@ type AkamaiClient struct {
 	Session   session.Session
 }
 
-// Traffic Report Query args struct
-/*type TrafficReportQueryArgs struct {
-	// required
-	End       string `json:"end"`        // yyyymmdd format
-	EndTime   string `json:"end_time"`   // HH:mm format
-	Start     string `json:"start"`      // yyyymmdd format
-	StartTime string `json:"start_time"` // HH:mm format
-	// optional
-	IncludeEstimates bool   `json:"include_estimates"`
-	TimeZone         string `json:"time_zone,omitempty"` //
-}*/
-
 type TrafficReportQueryArgs struct {
 	StartTime        time.Time `json:"start_time"` // RFC3339 / ISO 8601
 	EndTime          time.Time `json:"end_time"`   // RFC3339 / ISO 8601
@@ -80,8 +67,9 @@ type TrafficRecordsResponse [][]string
 
 type TrafficRecord struct {
 	Timestamp time.Time
-	DNSHits   int64
-	NXDHits   int64
+	DNSHits   float64
+	NXDHits   float64
+	SumRequests float64
 }
 
 type TrafficRecordList struct {
@@ -90,11 +78,17 @@ type TrafficRecordList struct {
 
 // Init edgegrid Config
 func EdgegridInit(edgercpath, section string) (*edgegrid.Config, error) {
+	options := []edgegrid.Option{
+		edgegrid.WithEnv(true),
+	}
+	if edgercpath != "" {
+		options = append(options, edgegrid.WithFile(edgercpath))
+	}
+	if section != "" {
+		options = append(options, edgegrid.WithSection(section))
+	}
 
-	config, err := edgegrid.New(
-		edgegrid.WithFile(edgercpath),
-		edgegrid.WithSection(section),
-	)
+	config, err := edgegrid.New(options...)
 	if err != nil {
 		return nil, fmt.Errorf("edgegrid initialization failed. Error: %s", err.Error())
 	}
@@ -115,15 +109,6 @@ func CreateDNSClient(config *edgegrid.Config) (dns.DNS, session.Session, error) 
 	return dns.Client(sess), sess, nil
 }
 
-// validate date in form yyyymmdd and < current date
-/*func validateTrafficDate(tdate string) error {
-	if len(tdate) != 8 {
-		return fmt.Errorf("date %s is invalid", tdate)
-	}
-	_, err := time.Parse("20060102", tdate)
-	return err
-}*/
-
 func validateTrafficDate(tdate string) error {
 	if len(tdate) != 8 {
 		return fmt.Errorf("date %s is invalid length", tdate)
@@ -133,8 +118,6 @@ func validateTrafficDate(tdate string) error {
 	if err != nil {
 		return fmt.Errorf("date %s is invalid format", tdate)
 	}
-
-	// Compare with current date (ignore time)
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 
@@ -182,24 +165,8 @@ func NewTrafficReportQueryArgs(start, end time.Time) *TrafficReportQueryArgs {
 	}
 }
 
-// Create QueryArgs from provided start and end time
-/*func CreateQueryArgs(startTime, endTime time.Time) *TrafficReportQueryArgs {
-	e := endTime.UTC().Format(time.RFC3339)
-	s := startTime.UTC().Format(time.RFC3339)
-
-	partsE := strings.Split(e, "T")
-	end := strings.ReplaceAll(partsE[0], "-", "")
-	endtime := partsE[1][:5]
-
-	partsS := strings.Split(s, "T")
-	start := strings.ReplaceAll(partsS[0], "-", "")
-	starttime := partsS[1][:5]
-
-	return NewTrafficReportQueryArgs(end, endtime, start, starttime)
-}*/
-
 func CreateQueryArgs(startTime, endTime time.Time) *TrafficReportQueryArgs {
-	interval := FIVE_MINUTES // You can make this dynamic if needed
+	interval := FIVE_MINUTES
 
 	now := time.Now().UTC()
 
@@ -237,52 +204,42 @@ func ConvertTrafficIntervalTime(intervaltime string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid time format: %s", intervaltime)
 }
 
-func safeParseInt(s string) (int64, error) {
+func safeParseFloat(s string) (float64, error) {
 	if s == "N/A" || s == "" {
 		return 0, nil
 	}
-	return strconv.ParseInt(s, 10, 64)
+	return strconv.ParseFloat(s, 64)
 }
-
-// Convert TrafficRecord object to string slice
-/*func ConvertTrafficRecordSlice(trslice []string) (TrafficRecord, error) {
-	trafficRecord := TrafficRecord{}
-	if len(trslice) < 3 {
-		return trafficRecord, fmt.Errorf("invalid record length")
-	}
-	ts, err := ConvertTrafficIntervalTime(trslice[0])
-	if err != nil {
-		return trafficRecord, err
-	}
-	dnsHits, err := strconv.ParseInt(trslice[1], 10, 64)
-	if err != nil {
-		return trafficRecord, err
-	}
-	nxdHits, err := strconv.ParseInt(trslice[2], 10, 64)
-	if err != nil {
-		return trafficRecord, err
-	}
-	return TrafficRecord{Timestamp: ts, DNSHits: dnsHits, NXDHits: nxdHits}, nil
-}*/
 
 func ConvertTrafficRecordSlice(trslice []string) (TrafficRecord, error) {
 	trafficRecord := TrafficRecord{}
-	if len(trslice) < 3 {
+	if len(trslice) < 4 {
 		return trafficRecord, fmt.Errorf("invalid record length")
 	}
 	ts, err := ConvertTrafficIntervalTime(trslice[0])
 	if err != nil {
 		return trafficRecord, err
 	}
-	dnsHits, err := safeParseInt(trslice[1])
+	dnsHits, err := safeParseFloat(trslice[1])
 	if err != nil {
 		return trafficRecord, err
 	}
-	nxdHits, err := safeParseInt(trslice[2])
+	nxdHits, err := safeParseFloat(trslice[2])
 	if err != nil {
 		return trafficRecord, err
 	}
-	return TrafficRecord{Timestamp: ts, DNSHits: dnsHits, NXDHits: nxdHits}, nil
+
+	sumReqs, err := safeParseFloat(trslice[3]) // Parse the 4th column
+    if err != nil { 
+		return trafficRecord, err 
+	}
+
+	return TrafficRecord{
+		Timestamp: ts, 
+		DNSHits: dnsHits, 
+		NXDHits: nxdHits,
+        SumRequests: sumReqs,
+		}, nil
 }
 
 func ConvertTrafficRecordsResponse(recordsresp TrafficRecordsResponse) TrafficRecordList {
@@ -299,6 +256,7 @@ func ConvertTrafficRecordsResponse(recordsresp TrafficRecordsResponse) TrafficRe
 	}
 	return trafficRecordList
 }
+
 func prettyPrintJSON(raw []byte) string {
 	var prettyJSON bytes.Buffer
 	err := json.Indent(&prettyJSON, raw, "", "  ")
@@ -340,8 +298,6 @@ func ceilToInterval(t time.Time, interval Interval) time.Time {
 	}
 }
 
-// GetTrafficReport retrieves and returns a zone traffic report slice of slices with provided query filters
-// See https://developer.akamai.com/api/cloud_security/edge_dns_traffic_reporting/v1.html#gettrafficreport for detail
 func GetTrafficReport(ctx context.Context, client dns.DNS, sess session.Session, zone string, trafficReportQueryArgs *TrafficReportQueryArgs) (TrafficRecordsResponse, error) {
 	if client == nil {
 		return nil, fmt.Errorf("dnsClient not initialized")
@@ -363,17 +319,6 @@ func GetTrafficReport(ctx context.Context, client dns.DNS, sess session.Session,
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	/*q := req.URL.Query()
-	q.Add("end", trafficReportQueryArgs.End)
-	q.Add("end_time", trafficReportQueryArgs.EndTime)
-	q.Add("start", trafficReportQueryArgs.Start)
-	q.Add("start_time", trafficReportQueryArgs.StartTime)
-	q.Add("include_estimates", strconv.FormatBool(trafficReportQueryArgs.IncludeEstimates))
-	if trafficReportQueryArgs.TimeZone != "" {
-		q.Add("time_zone", trafficReportQueryArgs.TimeZone)
-	}
-	req.URL.RawQuery = q.Encode()*/
-
 	q := req.URL.Query()
 	// Or better, pass full RFC3339 timestamps:
 	q.Add("start", trafficReportQueryArgs.StartTime.Format(time.RFC3339))
@@ -381,7 +326,7 @@ func GetTrafficReport(ctx context.Context, client dns.DNS, sess session.Session,
 
 	q.Add("interval", string(trafficReportQueryArgs.Interval))
 	q.Add("objectIds", zone)
-	//q.Add("metrics", "sum_hits,sum_nxdomain")
+	q.Add("metrics", "sum_hits,sum_nxdomain,sum_requests,total_hits,total_nxhits,peak_hits,peak_nxhits")
 
 	req.URL.RawQuery = q.Encode()
 
@@ -391,7 +336,7 @@ func GetTrafficReport(ctx context.Context, client dns.DNS, sess session.Session,
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Read full response body bytes for logging
 	bodyBytes, err := io.ReadAll(resp.Body)
@@ -399,47 +344,13 @@ func GetTrafficReport(ctx context.Context, client dns.DNS, sess session.Session,
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	log.Printf("HTTP Response Status: %s", resp.Status)
-	log.Println("=== RAW RESPONSE BODY ===")
-	log.Println(prettyPrintJSON(bodyBytes))
-	log.Println("=== END RAW RESPONSE BODY ===")
+	logrus.Debugf("HTTP Response Status: %s", resp.Status)
+	logrus.Debugf("=== RAW RESPONSE BODY ===")
+	logrus.Debug(prettyPrintJSON(bodyBytes))
+	logrus.Debugf("=== END RAW RESPONSE BODY ===")
 
 	bodyReader := bytes.NewReader(bodyBytes)
 	scanner := bufio.NewScanner(bodyReader)
-
-	// Parse the CSV response (skip metadata/summary blocks)
-	/*r := csv.NewReader(resp.Body)
-	lines, err := r.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CSV response: %w", err)
-	}
-	// Extract only actual data rows between #DATA_START and #DATA_END
-	var dataRows [][]string
-	inDataBlock := false
-
-	for _, line := range lines {
-		if len(line) == 0 {
-			continue
-		}
-		switch strings.TrimSpace(line[0]) {
-		case "#DATA_START":
-			inDataBlock = true
-		case "#DATA_END":
-			inDataBlock = false
-		default:
-			if inDataBlock {
-				dataRows = append(dataRows, line)
-			}
-		}
-	}
-
-	if len(dataRows) == 0 {
-		return nil, fmt.Errorf("no traffic data found for zone: %s", zone)
-	}
-
-	return TrafficRecordsResponse(dataRows), nil*/
-	// Read response line-by-line, skipping metadata and extracting CSV data only
-	//scanner := bufio.NewScanner(resp.Body)
 
 	var csvLines []string
 	inCSV := false
@@ -465,14 +376,6 @@ func GetTrafficReport(ctx context.Context, client dns.DNS, sess session.Session,
 	if len(csvLines) == 0 {
 		return nil, fmt.Errorf("no CSV data found in response")
 	}
-	/* //debug
-	log.Println("=== RAW CSV RESPONSE LINES ===")
-	for _, line := range csvLines {
-		log.Println(line)
-	}
-	log.Println("=== END RAW CSV RESPONSE ===")*/
-
-	// Parse only the CSV lines collected
 	csvReader := csv.NewReader(strings.NewReader(strings.Join(csvLines, "\n")))
 	records, err := csvReader.ReadAll()
 	if err != nil {

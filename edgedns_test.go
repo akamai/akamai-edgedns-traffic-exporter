@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"gopkg.in/h2non/gock.v1"
 
-	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v11/pkg/edgegrid"
+	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
 )
 
 var (
@@ -128,9 +128,7 @@ func TestValidateZone(t *testing.T) {
 }
 
 func TestValidateZone_Bad(t *testing.T) {
-
 	dnsTestZone := "testzone.com"
-
 	defer gock.Off()
 
 	mock := gock.New(fmt.Sprintf("https://akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net/config-dns/v2/zones/%s", dnsTestZone))
@@ -139,15 +137,12 @@ func TestValidateZone_Bad(t *testing.T) {
 		HeaderPresent("Authorization").
 		Reply(404).
 		SetHeader("Content-Type", "application/json;charset=UTF-8").
-		BodyString(`Not Found`)
+		BodyString(`{"error": "zone not found"}`)
 
 	ctx := context.Background()
-	client, sess, _ := CreateDNSClient(&config)
+	client, _, _ := CreateDNSClient(&config)
 	err := ValidateZone(ctx, client, dnsTestZone)
 	assert.Error(t, err)
-
-	_ = sess
-
 }
 
 func TestNewTrafficReportQueryArgs(t *testing.T) {
@@ -163,11 +158,11 @@ func TestNewTrafficReportQueryArgs(t *testing.T) {
 }
 
 func TestConvertTrafficRecordSlice(t *testing.T) {
-	data := []string{"2013-09-09T00:00:00Z", "9199", "145"}
+	data := []string{"2013-09-09T00:00:00Z", "9199", "145", "1000"}
 	record, err := ConvertTrafficRecordSlice(data)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(145), record.NXDHits)
-	assert.Equal(t, int64(9199), record.DNSHits)
+	assert.Equal(t, float64(145), record.NXDHits)
+	assert.Equal(t, float64(9199), record.DNSHits)
 }
 
 func TestConvertTrafficRecordSlice_Fail(t *testing.T) {
@@ -178,14 +173,14 @@ func TestConvertTrafficRecordSlice_Fail(t *testing.T) {
 
 func TestConvertTrafficRecordsResponse(t *testing.T) {
 	response := TrafficRecordsResponse{
-		{"START DATE/TIME", "ALL DNS HITS", "NXDOMAIN HITS"},
-		{"2013-09-09T00:00:00Z", "9199", "145"},
-		{"2013-09-09T00:05:00Z", "8888", "100"},
+		{"START DATE/TIME", "ALL DNS HITS", "NXDOMAIN HITS", "SUM REQUESTS"},
+		{"2013-09-09T00:00:00Z", "9199", "145", "1000"},
+		{"2013-09-09T00:05:00Z", "8888", "100", "500"},
 	}
 
 	list := ConvertTrafficRecordsResponse(response)
-	assert.Equal(t, int64(9199), list.TrafficRecords[0].DNSHits)
-	assert.Equal(t, int64(100), list.TrafficRecords[1].NXDHits)
+	assert.Equal(t, float64(9199), list.TrafficRecords[0].DNSHits)
+	assert.Equal(t, float64(100), list.TrafficRecords[1].NXDHits)
 }
 
 func TestGetTrafficReport(t *testing.T) {
@@ -219,7 +214,7 @@ startdatetime,sum_hits,sum_nxdomain,sum_requests
 2024-01-03T14:10:00Z,3834.168875,2510.499968,4761
 #DATA_END`
 
-	gock.New(fmt.Sprintf("https://akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net/reporting-api/v1/reports/authoritative-dns-traffic-by-time/versions/3/report-data")).
+	gock.New("https://akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net/reporting-api/v1/reports/authoritative-dns-traffic-by-time/versions/3/report-data").
 		Get("/reporting-api/v1/reports/authoritative-dns-traffic-by-time/versions/3/report-data").
 		MatchParam("start", startTime.Format(time.RFC3339)).
 		MatchParam("end", endTime.Format(time.RFC3339)).
@@ -257,7 +252,7 @@ func TestGetTrafficReport_BadArg(t *testing.T) {
 
 	defer gock.Off()
 
-	gock.New(fmt.Sprintf("https://akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net/reporting-api/v1/reports/authoritative-dns-traffic-by-time/versions/3/report-data")).
+	gock.New("https://akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net/reporting-api/v1/reports/authoritative-dns-traffic-by-time/versions/3/report-data").
 		Get("/reporting-api/v1/reports/authoritative-dns-traffic-by-time/versions/3/report-data").
 		MatchParam("start", startTime.Format(time.RFC3339)).
 		MatchParam("end", endTime.Format(time.RFC3339)).

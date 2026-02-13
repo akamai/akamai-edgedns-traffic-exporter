@@ -8,3 +8,6 @@ prometheus.yml
 .edgerc
 .DS_Store
 *.env
+edgedns.yml
+test.rules
+build/

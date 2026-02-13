@@ -16,14 +16,12 @@ package main
 import (
 	"context"
 
-	"log"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
 	"github.com/sirupsen/logrus"
 
-	kingpin "gopkg.in/alecthomas/kingpin.v2"
+	kingpin "github.com/alecthomas/kingpin/v2"
 
 	"fmt"
 	"net/http"
@@ -33,8 +31,8 @@ import (
 	"strings"
 	"time"
 
-	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v11/pkg/edgegrid"
-	"gopkg.in/yaml.v2"
+	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -57,6 +55,8 @@ var (
 	edgegridAccessToken  = kingpin.Flag("edgedns.edgegrid-access-token", "The Akamai Edgegrid access_token credential.").String()
 	//include_estimates	= kingpin.Flag("edgedns.end-time", "Flag to include estimates in traffic reports.").Bool()
 	//time_zone		= kingpin.Flag("edgedns.time-zone", "The timezone to use for start and end time.").String()
+	timestampLabel   = kingpin.Flag("edgedns.timestamp-label", "Creates time series with traffic timestamp as label.").Bool()
+	trafficTimestamp = kingpin.Flag("edgedns.traffic-timestamp", "Create time series with traffic timestamp.").Bool()
 
 	// invalidMetricChars    = regexp.MustCompile("[^a-zA-Z0-9_:]")
 	lookbackDuration = time.Hour * HoursInDay * lookbackDefaultDays
@@ -93,8 +93,8 @@ var dnsSummaryMap map[string]prometheus.Summary = make(map[string]prometheus.Sum
 var nxdSummaryMap map[string]prometheus.Summary = make(map[string]prometheus.Summary)
 
 // Interval Hits map by zone
-var dnsHitsMap map[string][]int64 = make(map[string][]int64)
-var nxdHitsMap map[string][]int64 = make(map[string][]int64)
+var dnsHitsMap map[string][]float64 = make(map[string][]float64)
+var nxdHitsMap map[string][]float64 = make(map[string][]float64)
 var hitsMapCap int
 
 // Initialize Akamai Edgegrid Config. Priority order:
@@ -125,6 +125,10 @@ func initAkamaiConfig(trafficExporterConfig EdgednsTrafficConfig) (*AkamaiClient
 		if err != nil {
 			return nil, fmt.Errorf("error initializing Akamai Edgegrid config: %w", err)
 		}
+	}
+
+	if config.Host == "" {
+		return nil, fmt.Errorf("host is empty: environment variables not detected")
 	}
 
 	dnsClient, sess, err := CreateDNSClient(config)
@@ -164,8 +168,8 @@ func createZoneMaps(zones []string) {
 			})
 		intervals := lookbackDuration / (time.Minute * 5)
 		hitsMapCap = int(intervals)
-		dnsHitsMap[zone] = make([]int64, 0, hitsMapCap)
-		nxdHitsMap[zone] = make([]int64, 0, hitsMapCap)
+		dnsHitsMap[zone] = make([]float64, 0, hitsMapCap)
+		nxdHitsMap[zone] = make([]float64, 0, hitsMapCap)
 	}
 }
 
@@ -174,36 +178,46 @@ func calcSummaryWindowDuration(window string) error {
 
 	var datawin int
 	var err error
-	var multiplier time.Duration = time.Hour * time.Duration(HoursInDay) // assume days
+	var multiplier time.Duration
 
 	logrus.Debugf("Window: %s", window)
 	if window == "" {
 		return fmt.Errorf("summary window not set")
 	}
-	iunit := window[len(window)-1:]
-	if !strings.Contains("mhd", strings.ToLower(iunit)) {
-		// no units. default days
+	// Get the last character as the unit
+	iunit := strings.ToLower(window[len(window)-1:])
+
+	// Check if the last character is a digit (meaning no unit provided)
+	if iunit[0] >= '0' && iunit[0] <= '9' {
 		datawin, err = strconv.Atoi(window)
+		multiplier = time.Hour * 24 // Default to days
 	} else {
-		len := window[0 : len(window)-1]
-		datawin, err = strconv.Atoi(len)
-		if strings.ToLower(iunit) == "m" {
+		valStr := window[0 : len(window)-1]
+		datawin, err = strconv.Atoi(valStr)
+
+		switch iunit {
+		case "m":
 			multiplier = time.Minute
-			if err == nil && datawin < trafficReportInterval {
+			if datawin < trafficReportInterval {
 				datawin = trafficReportInterval
 			}
-		} else if strings.ToLower(iunit) == "h" {
+		case "h":
 			multiplier = time.Hour
+		case "d":
+			multiplier = time.Hour * 24
+		default:
+			return fmt.Errorf("invalid unit %q in summary window", iunit)
 		}
 	}
+
 	if err != nil {
-		logrus.Warnf("ERROR: %s", err.Error())
+		logrus.Warnf("Error parsing window value: %s", err.Error())
 		return err
 	}
-	logrus.Debugf("multiplier: [%v} units: [%v]", multiplier, datawin)
-	lookbackDuration = multiplier * time.Duration(datawin)
-	return nil
 
+	lookbackDuration = multiplier * time.Duration(datawin)
+	logrus.Debugf("Calculated lookbackDuration: %v", lookbackDuration)
+	return nil
 }
 
 // Describe function
@@ -234,17 +248,6 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 		logrus.Debugf("Fetching Report for zone %s. Args: [%v}", zone, qargs)
 		ctx := context.Background()
 		zoneTrafficReport, err := GetTrafficReport(ctx, e.AkamaiClient.DNSClient, e.AkamaiClient.Session, zone, qargs)
-
-		/*if err != nil {
-			apierr, ok := err.(client.APIError)
-			if ok && apierr.Status == 500 {
-				logrus.Warnf("Unable to get traffic report for zone %s. Internal error ... Skipping.", zone)
-				continue
-			}
-			logrus.Errorf("Unable to get traffic report for zone %s ... Skipping. Error: %s", zone, err.Error())
-			continue
-		}*/
-
 		if err != nil {
 			var statusCode int
 			if apiErr, ok := err.(interface{ Status() int }); ok {
@@ -269,6 +272,8 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 
 		for _, reportInstance := range reportList.TrafficRecords {
 			// TODO: Worry about overwriting existing? Catch for now and skip.
+			//reportInstance.DNSHits = math.Round(reportInstance.DNSHits * 86400)
+			//reportInstance.NXDHits = math.Round(reportInstance.NXDHits * 86400)
 			if !reportInstance.Timestamp.After(e.LastTimestamp[zone]) {
 				logrus.Debugf("Instance timestamp: [%v]. Last timestamp: [%v]", reportInstance.Timestamp, e.LastTimestamp[zone])
 				logrus.Warnf("Attempting to re process report instance: [%v]. Skipping.", reportInstance)
@@ -281,20 +286,20 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 				logrus.Debugf("Filling in entry with timestamp: %v", reportInstance.Timestamp)
 				// Missed interval insert with averages
 				dnsLen := int64(len(dnsHitsMap[zone]))
-				var dnsHitsSum int64
+				var dnsHitsSum float64
 				// calc current rolling dns sum
 				for _, dhit := range dnsHitsMap[zone] {
 					dnsHitsSum += dhit
 				}
 				nxdLen := int64(len(nxdHitsMap[zone]))
-				var nxdHitsSum int64
+				var nxdHitsSum float64
 				// calc current rolling nxd sum
 				for _, nhit := range nxdHitsMap[zone] {
 					nxdHitsSum += nhit
 				}
 				if dnsLen > 0 {
-					reportInstance.DNSHits = dnsHitsSum / dnsLen
-					reportInstance.NXDHits = nxdHitsSum / nxdLen
+					reportInstance.DNSHits = float64(dnsHitsSum) / float64(dnsLen)
+					reportInstance.NXDHits = float64(nxdHitsSum) / float64(nxdLen)
 				}
 			}
 
@@ -380,74 +385,67 @@ func init() {
 
 func main() {
 
-	logLevel := kingpin.Flag("log.level", "Set the logging level (debug, info, warn, error)").Default("info").String()
-	fmt.Printf("Logging level set to %s\n", *logLevel)
+	logLevel := kingpin.Flag("log.level", "Only log messages with the given severity or above. Valid levels: [debug, info, warn, error, fatal]").Default("info").Enum("debug", "info", "warn", "error", "fatal")
+	logFormat := kingpin.Flag("log.format", "Set the log target and format. Example: logger:stderr?json=true").Default("logger:stderr").String()
+
 	//log.AddFlags(kingpin.CommandLine)
 	kingpin.Version(version.Print("akamai_edgedns_traffic_exporter"))
 	kingpin.HelpFlag.Short('h')
 	kingpin.Parse()
 
-	logrus.Infof("Config file: %s", *configFile)
-	// TODO: Remove
-	//log.Infof("Start: %s", *start)
-	//log.Infof("Start Time: %s", *start_time)
+	level, err := logrus.ParseLevel(strings.ToLower(*logLevel))
+	if err != nil {
+		logrus.Errorf("Invalid log level %q, defaulting to info", *logLevel)
+		level = logrus.InfoLevel
+	}
 
+	logrus.SetLevel(level)
+	if strings.Contains(*logFormat, "json=true") {
+		logrus.SetFormatter(&logrus.JSONFormatter{})
+	} else {
+		logrus.SetFormatter(&logrus.TextFormatter{
+			FullTimestamp: true,
+		})
+	}
+	// Now your logs will follow the flag!
+	logrus.Infof("Logging level set to %s", logrus.GetLevel())
+
+	logrus.Infof("Config file: %s", *configFile)
 	logrus.Info("Starting Edge DNS Traffic exporter", version.Info())
 	logrus.Info("Build context", version.BuildContext())
 
 	edgednsTrafficConfig, err := loadConfig(*configFile) // save?
 	if err != nil {
-		log.Fatalf("Error loading akamai_edgedns_traffic_exporter config file: %v", err)
+		logrus.Fatalf("Error loading akamai_edgedns_traffic_exporter config file: %v", err)
 	}
 
 	logrus.Debugf("Exporter configuration: [%v]", edgednsTrafficConfig)
 
+	if *timestampLabel {
+		edgednsTrafficConfig.TSLabel = true
+	}
+	if *trafficTimestamp {
+		edgednsTrafficConfig.UseTimestamp = true
+	}
+
 	// Initalize Akamai Edgegrid ...
 	akamaiClient, err := initAkamaiConfig(edgednsTrafficConfig)
 	if err != nil {
-		log.Fatalf("Error initializing Akamai Edgegrid config: %s", err.Error())
+		logrus.Fatalf("Error initializing Akamai Edgegrid config: %s", err.Error())
 	}
 
-	tstart := time.Now().UTC().Add(time.Minute * time.Duration(trafficReportInterval*-1)) // assume start time is Exporter launch less 5 mins
+	lookbackDuration = time.Hour * 24 * time.Duration(lookbackDefaultDays)
+
 	if edgednsTrafficConfig.SummaryWindow != "" {
 		err = calcSummaryWindowDuration(edgednsTrafficConfig.SummaryWindow)
-		if err == nil {
-			tstart = time.Now().UTC().Add(lookbackDuration * -1)
-		} else {
+		if err != nil {
 			logrus.Warnf("Retention window is not valid. Using default (%d days)", lookbackDefaultDays)
 		}
 	} else {
 		logrus.Warnf("Retention window is not configured. Using default (%d days)", lookbackDefaultDays)
 	}
-	// TODO: DO we want to expose start time or only lookback window?
-	/*
-		if len(*start) > 0 && len(*start_time) > 0 {
-			serr := validateTrafficDate(*start)
-			sterr := validateTrafficTime(*start_time)
-			if serr != nil {
-				log.Warnf("start validation failed: %s. Using current date and time", err.Error())
-			} else if sterr != nil {
-				log.Warnf("start_time validation failed: %s. Using current date and time", err.Error())
-			} else {
-				s := *start
-				st := *start_time
-				yr, _ := strconv.Atoi(s[0:4])
-				mn, _ := strconv.Atoi(s[4:6])
-				dy, _ := strconv.Atoi(s[6:8])
-				hr, _ := strconv.Atoi(st[0:2])
-				mm, _ := strconv.Atoi(st[3:5])
-				tstart = time.Date(
-					yr,
-					time.Month(mn),
-					dy,
-					hr,
-					mm,
-					0,
-					0,
-					time.UTC)
-			}
-		}
-	*/
+
+	tstart := time.Now().UTC().Add(lookbackDuration * -1)
 
 	logrus.Infof("Edge DNS Traffic exporter start time: %v", tstart)
 
@@ -472,7 +470,7 @@ func main() {
 
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`<html>
+		_, _ = w.Write([]byte(`<html>
 			<head><title>akamai_edgedns_traffic_exporter</title></head>
 			<body>
 			<h1>akamai_edgedns_traffic_exporter</h1>
@@ -482,7 +480,7 @@ func main() {
 	})
 
 	logrus.Info("Beginning to serve on address ", *listenAddress)
-	log.Fatal(http.ListenAndServe(*listenAddress, nil))
+	logrus.Fatal(http.ListenAndServe(*listenAddress, nil))
 
 }
 
