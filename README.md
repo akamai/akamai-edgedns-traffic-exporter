@@ -51,11 +51,11 @@ make docker
 
 The resulting image is named based on your architecture:
 
-`/akamai/akamai-edgedns-traffic-exporterlinux-amd64:<git-branch>` 
+`/akamai/akamai-edgedns-traffic-exporter-linux-amd64:<git-branch>` 
 
 or 
 
-`/akamai/akamai-edgedns-traffic-exporterlinux-arm64:<git-branch>`
+`/akamai/akamai-edgedns-traffic-exporter-linux-arm64:<git-branch>`
 
 ## Test
 
