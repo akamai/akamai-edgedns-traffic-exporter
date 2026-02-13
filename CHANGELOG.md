@@ -2,7 +2,7 @@
 * Upgraded the plugin to use Akamai Edgegrid v12
 * Upgraded the plugin to use latest Prometheus Go libraries
 * Upgraded the plugin to use the latest Akamai Reporting API -- [authoritative-dns-traffic-by-time](https://techdocs.akamai.com/reporting/v1/reference/authoritative-dns-traffic-by-time)
-* Added support for arm64
+* Added support for darwin/arm64
 
 
 ## 0.1.0 / 2021-01-31
