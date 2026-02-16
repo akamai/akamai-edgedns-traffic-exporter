@@ -478,7 +478,7 @@ func main() {
 	}
 
 	if akamaiClient.UseLegacy {
-		logrus.Warn("Running in LEGACY mode (using /data-dns/v1 API). Note: This API is deprecated.")
+		logrus.Info("Running in LEGACY mode (using /data-dns/v1 API). Note: This API is deprecated.")
 	} else {
 		logrus.Info("Running in MODERN mode (using /reporting-api/v1/reports/authoritative-dns-traffic-by-time API).")
 	}
