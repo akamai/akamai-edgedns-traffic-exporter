@@ -157,12 +157,30 @@ func TestNewTrafficReportQueryArgs(t *testing.T) {
 	assert.Equal(t, endTime.UTC(), qa.EndTime)
 }
 
+func TestNewTrafficReportQueryArgs_Legacy(t *testing.T) {
+	startTime, _ := time.Parse(time.RFC3339, "2024-01-03T13:55:00Z")
+	endTime, _ := time.Parse(time.RFC3339, "2024-01-03T14:15:00Z")
+
+	qa := CreateQueryArgs_Legacy(startTime, endTime)
+
+	assert.Equal(t, "20240103", qa.Start)
+	assert.Equal(t, "13:55", qa.StartTime)
+}
+
 func TestConvertTrafficRecordSlice(t *testing.T) {
 	data := []string{"2013-09-09T00:00:00Z", "9199", "145", "1000"}
 	record, err := ConvertTrafficRecordSlice(data)
 	assert.NoError(t, err)
 	assert.Equal(t, float64(145), record.NXDHits)
 	assert.Equal(t, float64(9199), record.DNSHits)
+}
+
+func TestConvertTrafficRecordSlice_Legacy(t *testing.T) {
+	data := []string{"09/09/2013 00:00 GMT", "9199", "145"}
+	record, err := ConvertTrafficRecordSlice(data)
+	assert.NoError(t, err)
+	assert.Equal(t, float64(9199), record.DNSHits)
+	assert.Equal(t, float64(145), record.NXDHits)
 }
 
 func TestConvertTrafficRecordSlice_Fail(t *testing.T) {
@@ -234,6 +252,34 @@ startdatetime,sum_hits,sum_nxdomain,sum_requests
 	assert.NoError(t, err)
 	assert.Equal(t, "4803.583281", report[0][1])
 	assert.Equal(t, "2510.499968", report[3][2])
+}
+func TestGetTrafficReport_Legacy(t *testing.T) {
+	testflag = true
+	zone := "testzone.com"
+
+	startTime, _ := time.Parse(time.RFC3339, "2024-01-03T13:55:00Z")
+	endTime, _ := time.Parse(time.RFC3339, "2024-01-03T14:15:00Z")
+	queryargs := CreateQueryArgs_Legacy(startTime, endTime)
+
+	defer gock.Off()
+	mockBody := `START DATE/TIME, ALL DNS HITS, NXDOMAIN HITS
+09/09/2013 00:00 GMT,9199,145
+09/09/2013 00:05 GMT,8888,100`
+
+	gock.New("https://akaa-baseurl-xxxxxxxxxxx-xxxxxxxxxxxxx.luna.akamaiapis.net").
+		Get(fmt.Sprintf("/data-dns/v1/traffic/%s", zone)).
+		Reply(200).
+		Type("text/csv").
+		BodyString(mockBody)
+
+	ctx := context.Background()
+	client, sess, _ := CreateDNSClient(&config)
+	report, err := GetTrafficReport_Legacy(ctx, client, sess, zone, queryargs)
+	testflag = false
+
+	assert.NoError(t, err)
+	assert.Equal(t, "9199", report[0][1])
+	assert.Equal(t, "145", report[0][2])
 }
 
 func TestGetTrafficReport_BadArg(t *testing.T) {

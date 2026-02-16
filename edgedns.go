@@ -53,6 +53,7 @@ const (
 type AkamaiClient struct {
 	DNSClient dns.DNS
 	Session   session.Session
+	UseLegacy bool
 }
 
 type TrafficReportQueryArgs struct {
@@ -63,12 +64,21 @@ type TrafficReportQueryArgs struct {
 	Interval         Interval  `json:"interval,omitempty"`
 }
 
+type TrafficReportQueryArgs_Legacy struct {
+	End              string `json:"end"`        // yyyymmdd
+	EndTime          string `json:"end_time"`   // HH:mm
+	Start            string `json:"start"`      // yyyymmdd
+	StartTime        string `json:"start_time"` // HH:mm
+	IncludeEstimates bool   `json:"include_estimates"`
+	TimeZone         string `json:"time_zone,omitempty"`
+}
+
 type TrafficRecordsResponse [][]string
 
 type TrafficRecord struct {
-	Timestamp time.Time
-	DNSHits   float64
-	NXDHits   float64
+	Timestamp   time.Time
+	DNSHits     float64
+	NXDHits     float64
 	SumRequests float64
 }
 
@@ -165,6 +175,15 @@ func NewTrafficReportQueryArgs(start, end time.Time) *TrafficReportQueryArgs {
 	}
 }
 
+func NewTrafficReportQueryArgs_Legacy(end, endtime, start, starttime string) *TrafficReportQueryArgs_Legacy {
+	return &TrafficReportQueryArgs_Legacy{
+		End:       end,
+		EndTime:   endtime,
+		Start:     start,
+		StartTime: starttime,
+	}
+}
+
 func CreateQueryArgs(startTime, endTime time.Time) *TrafficReportQueryArgs {
 	interval := FIVE_MINUTES
 
@@ -190,6 +209,14 @@ func CreateQueryArgs(startTime, endTime time.Time) *TrafficReportQueryArgs {
 	}
 }
 
+func CreateQueryArgs_Legacy(startTime, endTime time.Time) *TrafficReportQueryArgs_Legacy {
+	start := startTime.UTC().Format("20060102")
+	startTimeStr := startTime.UTC().Format("15:04")
+	end := endTime.UTC().Format("20060102")
+	endTimeStr := endTime.UTC().Format("15:04")
+	return NewTrafficReportQueryArgs_Legacy(end, endTimeStr, start, startTimeStr)
+}
+
 // Util function to convert traffic interval time/date to time.Time object
 func ConvertTrafficIntervalTime(intervaltime string) (time.Time, error) {
 	if ts, err := time.Parse(time.RFC3339, intervaltime); err == nil {
@@ -213,8 +240,8 @@ func safeParseFloat(s string) (float64, error) {
 
 func ConvertTrafficRecordSlice(trslice []string) (TrafficRecord, error) {
 	trafficRecord := TrafficRecord{}
-	if len(trslice) < 4 {
-		return trafficRecord, fmt.Errorf("invalid record length")
+	if len(trslice) < 3 {
+		return trafficRecord, fmt.Errorf("invalid record length: %v", trslice)
 	}
 	ts, err := ConvertTrafficIntervalTime(trslice[0])
 	if err != nil {
@@ -229,25 +256,24 @@ func ConvertTrafficRecordSlice(trslice []string) (TrafficRecord, error) {
 		return trafficRecord, err
 	}
 
-	sumReqs, err := safeParseFloat(trslice[3]) // Parse the 4th column
-    if err != nil { 
-		return trafficRecord, err 
-	}
+	trafficRecord.Timestamp = ts
+	trafficRecord.DNSHits = dnsHits
+	trafficRecord.NXDHits = nxdHits
 
-	return TrafficRecord{
-		Timestamp: ts, 
-		DNSHits: dnsHits, 
-		NXDHits: nxdHits,
-        SumRequests: sumReqs,
-		}, nil
+	// Only attempt to parse SumRequests if the 4th column exists (New API)
+	if len(trslice) >= 4 {
+		sumReqs, err := safeParseFloat(trslice[3])
+		if err != nil {
+			return trafficRecord, err
+		}
+		trafficRecord.SumRequests = sumReqs
+	}
+	return trafficRecord, nil
 }
 
 func ConvertTrafficRecordsResponse(recordsresp TrafficRecordsResponse) TrafficRecordList {
 	trafficRecordList := TrafficRecordList{}
-	for i, rec := range recordsresp {
-		if i == 0 {
-			continue
-		}
+	for _, rec := range recordsresp {
 		tr, err := ConvertTrafficRecordSlice(rec)
 		if err != nil {
 			continue
@@ -314,7 +340,7 @@ func GetTrafficReport(ctx context.Context, client dns.DNS, sess session.Session,
 	// construct GET url
 	// Build the new API URL
 	baseURL := "/reporting-api/v1/reports/authoritative-dns-traffic-by-time/versions/3/report-data"
-	req, err := http.NewRequest(http.MethodGet, baseURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -346,7 +372,11 @@ func GetTrafficReport(ctx context.Context, client dns.DNS, sess session.Session,
 
 	logrus.Debugf("HTTP Response Status: %s", resp.Status)
 	logrus.Debugf("=== RAW RESPONSE BODY ===")
-	logrus.Debug(prettyPrintJSON(bodyBytes))
+	if strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
+		logrus.Debug(prettyPrintJSON(bodyBytes))
+	} else {
+		logrus.Debugf("Raw CSV Data: %d bytes received", len(bodyBytes))
+	}
 	logrus.Debugf("=== END RAW RESPONSE BODY ===")
 
 	bodyReader := bytes.NewReader(bodyBytes)
@@ -394,5 +424,54 @@ func GetTrafficReport(ctx context.Context, client dns.DNS, sess session.Session,
 	}
 
 	return TrafficRecordsResponse(dataRows), nil
+
+}
+
+func GetTrafficReport_Legacy(ctx context.Context, client dns.DNS, sess session.Session, zone string, trafficReportQueryArgs_Legacy *TrafficReportQueryArgs_Legacy) (TrafficRecordsResponse, error) {
+	if client == nil {
+		return nil, fmt.Errorf("dnsClient not initialized")
+	}
+
+	if err := ValidateZone(ctx, client, zone); err != nil {
+		return nil, fmt.Errorf("zone not reachable: %w", err)
+	}
+
+	if trafficReportQueryArgs_Legacy.StartTime == "" || trafficReportQueryArgs_Legacy.EndTime == "" {
+		return nil, fmt.Errorf("start_time or end_time is not set")
+	}
+
+	baseURL := fmt.Sprintf("/data-dns/v1/traffic/%s", zone)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	q := req.URL.Query()
+	q.Add("end", trafficReportQueryArgs_Legacy.End)
+	q.Add("end_time", trafficReportQueryArgs_Legacy.EndTime)
+	q.Add("start", trafficReportQueryArgs_Legacy.Start)
+	q.Add("start_time", trafficReportQueryArgs_Legacy.StartTime)
+	q.Add("include_estimates", strconv.FormatBool(trafficReportQueryArgs_Legacy.IncludeEstimates))
+	req.URL.RawQuery = q.Encode()
+
+	req.Header.Add("Accept", "text/csv")
+
+	resp, err := sess.Exec(req, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("akamai legacy api returned status %d", resp.StatusCode)
+	}
+
+	r := csv.NewReader(resp.Body)
+	records, err := r.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	return TrafficRecordsResponse(records[1:]), nil
 
 }

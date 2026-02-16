@@ -1,6 +1,6 @@
 # akamai-edgedns-traffic-exporter
 
-The Edge DNS Prometheus Traffic Exporter Technical Preview publishes Akamai Edge DNS [Traffic Report](https://techdocs.akamai.com/reporting/v1/reference/authoritative-dns-traffic-by-time) data as metrics. With Edge DNS metrics, Prometheus can track DNS query and NXDOMAIN traffic and trigger alerts such as NXDOMAIN spikes that exceed a thresh hold, e.g. 10x a rolling average, and might be indicative of DNS abuse or an attack.
+The Edge DNS Prometheus Traffic Exporter Technical Preview publishes data from both the Akamai Edge DNS [authotitative-dns-traffic-by-time](https://techdocs.akamai.com/reporting/v1/reference/authoritative-dns-traffic-by-time) and [Edge DNS Traffic Reporting API v1](https://techdocs.akamai.com/developer/pdfs/edge-dns-traffic-reporting-api-v1.pdf) data as metrics. With Edge DNS metrics, Prometheus can track DNS query and NXDOMAIN traffic and trigger alerts such as NXDOMAIN spikes that exceed a thresh hold, e.g. 10x a rolling average, and might be indicative of DNS abuse or an attack.
 
 ## Getting started
 
@@ -190,6 +190,8 @@ Flags:
                           The Akamai Edgegrid client_token credential.
       --edgedns.edgegrid-access-token=EDGEDNS.EDGEGRID-ACCESS-TOKEN
                           The Akamai Edgegrid access_token credential.
+      --edgedns.use-legacy-api
+                          If specified, uses the deprecated Edge DNS Traffic Reporting API v1 instead of the authoritative-dns-traffic-by-time Reporting API.
       --log.level="info"  Only log messages with the given severity or above. Valid levels: [debug, info, warn, error,
                           fatal]
       --log.format="logger:stderr"  
@@ -198,6 +200,8 @@ Flags:
 ```
 
 Note: By default, the exporter expects the configuration file to exist in the current working directory (e.g. `./edgedns.yml`).
+
+Note: By default, the exporter uses the authoritative-dns-traffic-by-time Reporting API unless the --use-legacy-api flag is specified.
 
 #### Example invocations
 
@@ -211,6 +215,12 @@ Note: By default, the exporter expects the configuration file to exist in the cu
 
 ```bash
 ./akamai-edgedns-traffic-exporter --config.file=edgedns_example_config.yml --edgedns.edgegrid-host akab-abcdefghijklmnop-01234567890aaaaa.luna.akamaiapis.net --edgedns.edgegrid-access-token example_provided_access_token --edgedns.edgegrid-client-token example_provided_client_token --edgedns.edgegrid-client-secret example_provided_client_secret
+```
+
+`Invoke exporter with a configuration file path and to use Edge DNS Traffic Reporting API v1`
+
+```bash
+./akamai-edgedns-traffic-exporter --config.file=edgedns_example_config.yml --edgedns.use-legacy-api
 ```
 
 ### Using the Docker container
@@ -293,6 +303,15 @@ edgedns_traffic_nxd_hits_per_interval_summary_count{zone="edgedns.zone"} 1
 To view the metrics in Prometheus, visit Graph and Execute a query expression for one of the metrics. As an example, the following image shows the graph for `edgedns_traffic_nxd_hits_per_interval_summary_sum`.
 
 ![Prometheus](/static/prometheus.png)
+
+## Important: Switching Between APIs
+
+When the Prometheus server is started, it creates a `/data` directory to manage its time-series database.
+
+**If you switch between the Modern and Legacy APIs, you must delete the `/data` directory.** 
+
+* The two APIs use different precision levels (Floating-point vs. Integer). Mixing this data in the same directory will disrupt your results.
+* **Warning:** Deleting the `/data` directory will result in the **permanent loss of all previously collected historical data**. Proceed with caution.
 
 ## Post Processing Metrics with recording rules
 

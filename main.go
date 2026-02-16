@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"math"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -57,6 +58,7 @@ var (
 	//time_zone		= kingpin.Flag("edgedns.time-zone", "The timezone to use for start and end time.").String()
 	timestampLabel   = kingpin.Flag("edgedns.timestamp-label", "Creates time series with traffic timestamp as label.").Bool()
 	trafficTimestamp = kingpin.Flag("edgedns.traffic-timestamp", "Create time series with traffic timestamp.").Bool()
+	useLegacyAPI     = kingpin.Flag("edgedns.use-legacy-api", "If true, use the deprecated Edge DNS Traffic Reporting API v1 instead of the authoritative-dns-traffic-by-time Reporting API.").Default("false").Bool()
 
 	// invalidMetricChars    = regexp.MustCompile("[^a-zA-Z0-9_:]")
 	lookbackDuration = time.Hour * HoursInDay * lookbackDefaultDays
@@ -139,6 +141,7 @@ func initAkamaiConfig(trafficExporterConfig EdgednsTrafficConfig) (*AkamaiClient
 	return &AkamaiClient{
 		DNSClient: dnsClient,
 		Session:   sess,
+		UseLegacy: *useLegacyAPI,
 	}, nil
 }
 
@@ -231,7 +234,7 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 	logrus.Debugf("Entering EdgeDNS Collect")
 
 	endtime := time.Now().UTC() // Use same current time for all zones
-
+	ctx := context.Background()
 	// TODO: Purge old data points
 
 	// Collect metrics for each zone
@@ -244,23 +247,26 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 		if endtime.Before(lasttime.Add(time.Minute * 5)) {
 			lasttime = lasttime.Add(time.Minute * 5)
 		}
-		qargs := CreateQueryArgs(lasttime, endtime)
-		logrus.Debugf("Fetching Report for zone %s. Args: [%v}", zone, qargs)
-		ctx := context.Background()
-		zoneTrafficReport, err := GetTrafficReport(ctx, e.AkamaiClient.DNSClient, e.AkamaiClient.Session, zone, qargs)
-		if err != nil {
-			var statusCode int
-			if apiErr, ok := err.(interface{ Status() int }); ok {
-				statusCode = apiErr.Status()
-			} else if apiErr, ok := err.(interface{ StatusCode() int }); ok {
-				statusCode = apiErr.StatusCode()
-			}
+		//qargs := CreateQueryArgs(lasttime, endtime)
+		var zoneTrafficReport TrafficRecordsResponse
+		var err error
 
-			if statusCode == 500 {
+		if e.AkamaiClient.UseLegacy {
+			qargs := CreateQueryArgs_Legacy(lasttime, endtime)
+			zoneTrafficReport, err = GetTrafficReport_Legacy(ctx, e.AkamaiClient.DNSClient, e.AkamaiClient.Session, zone, qargs)
+			logrus.Debugf("Fetching Report for zone %s. Args: [%v]", zone, qargs)
+		} else {
+			qargs := CreateQueryArgs(lasttime, endtime)
+			zoneTrafficReport, err = GetTrafficReport(ctx, e.AkamaiClient.DNSClient, e.AkamaiClient.Session, zone, qargs)
+			logrus.Debugf("Fetching Report for zone %s. Args: [%v]", zone, qargs)
+		}
+
+		if err != nil {
+			if strings.Contains(err.Error(), "500") {
 				logrus.Warnf("Server error from Akamai API for zone %s, skipping.", zone)
 				continue
 			}
-			logrus.Errorf("Error retrieving traffic report for zone %s: %v — skipping zone", zone, err)
+			logrus.Errorf("Error retrieving traffic report for zone %s: %v", zone, err)
 			continue
 		}
 
@@ -274,6 +280,10 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 			// TODO: Worry about overwriting existing? Catch for now and skip.
 			//reportInstance.DNSHits = math.Round(reportInstance.DNSHits * 86400)
 			//reportInstance.NXDHits = math.Round(reportInstance.NXDHits * 86400)
+			if e.AkamaiClient.UseLegacy {
+				reportInstance.DNSHits = math.Round(reportInstance.DNSHits)
+				reportInstance.NXDHits = math.Round(reportInstance.NXDHits)
+			}
 			if !reportInstance.Timestamp.After(e.LastTimestamp[zone]) {
 				logrus.Debugf("Instance timestamp: [%v]. Last timestamp: [%v]", reportInstance.Timestamp, e.LastTimestamp[zone])
 				logrus.Warnf("Attempting to re process report instance: [%v]. Skipping.", reportInstance)
@@ -281,7 +291,7 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 			}
 			// See if we missed an interval. Use averages to fill in.
 			logrus.Debugf("Instance timestamp: [%v]. Last timestamp: [%v]", reportInstance.Timestamp, e.LastTimestamp[zone])
-			if reportInstance.Timestamp.After(e.LastTimestamp[zone].Add(time.Minute * (trafficReportInterval + 1))) {
+			/*if reportInstance.Timestamp.After(e.LastTimestamp[zone].Add(time.Minute * (trafficReportInterval + 1))) {
 				reportInstance.Timestamp = e.LastTimestamp[zone].Add(time.Minute * trafficReportInterval)
 				logrus.Debugf("Filling in entry with timestamp: %v", reportInstance.Timestamp)
 				// Missed interval insert with averages
@@ -300,6 +310,39 @@ func (e *EdgednsTrafficExporter) Collect(ch chan<- prometheus.Metric) {
 				if dnsLen > 0 {
 					reportInstance.DNSHits = float64(dnsHitsSum) / float64(dnsLen)
 					reportInstance.NXDHits = float64(nxdHitsSum) / float64(nxdLen)
+				}
+			}*/
+
+			if reportInstance.Timestamp.After(e.LastTimestamp[zone].Add(time.Minute * (trafficReportInterval + 1))) {
+				reportInstance.Timestamp = e.LastTimestamp[zone].Add(time.Minute * trafficReportInterval)
+
+				dnsLen := int64(len(dnsHitsMap[zone]))
+				nxdLen := int64(len(nxdHitsMap[zone]))
+
+				if dnsLen > 0 {
+					if e.AkamaiClient.UseLegacy {
+						var dnsHitsSumInt int64
+						for _, dhit := range dnsHitsMap[zone] {
+							dnsHitsSumInt += int64(math.Round(dhit))
+						}
+						var nxdHitsSumInt int64
+						for _, nhit := range nxdHitsMap[zone] {
+							nxdHitsSumInt += int64(math.Round(nhit))
+						}
+						reportInstance.DNSHits = float64(dnsHitsSumInt / dnsLen)
+						reportInstance.NXDHits = float64(nxdHitsSumInt / nxdLen)
+					} else {
+						var dnsHitsSumFloat float64
+						for _, dhit := range dnsHitsMap[zone] {
+							dnsHitsSumFloat += dhit
+						}
+						var nxdHitsSumFloat float64
+						for _, nhit := range nxdHitsMap[zone] {
+							nxdHitsSumFloat += nhit
+						}
+						reportInstance.DNSHits = dnsHitsSumFloat / float64(dnsLen)
+						reportInstance.NXDHits = nxdHitsSumFloat / float64(nxdLen)
+					}
 				}
 			}
 
@@ -432,6 +475,12 @@ func main() {
 	akamaiClient, err := initAkamaiConfig(edgednsTrafficConfig)
 	if err != nil {
 		logrus.Fatalf("Error initializing Akamai Edgegrid config: %s", err.Error())
+	}
+
+	if akamaiClient.UseLegacy {
+		logrus.Warn("Running in LEGACY mode (using /data-dns/v1 API). Note: This API is deprecated.")
+	} else {
+		logrus.Info("Running in MODERN mode (using /reporting-api/v1/reports/authoritative-dns-traffic-by-time API).")
 	}
 
 	lookbackDuration = time.Hour * 24 * time.Duration(lookbackDefaultDays)
