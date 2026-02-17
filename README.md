@@ -278,6 +278,7 @@ and continue to collect future metric data. The dropped data will not be availab
 
 To glimpse Edge DNS Traffic metric activity in the exporter, visit the exporter's metrics web page with a browser using local host and the exporter's port known from one of the INFO startup messages (e.g. http://localhost:9801/metrics). The web page will present exporter status and metrics as follows.
 
+#### If default behaviour (authoritative-dns-traffic-by-time API) is used
 ```
 # HELP akamai_edgedns_traffic_exporter_build_info Build info with version, revision, branch, goversion
 # TYPE akamai_edgedns_traffic_exporter_build_info gauge
@@ -296,6 +297,27 @@ edgedns_traffic_nxd_hits_per_interval{zone="edgedns.zone"} 0
 # TYPE edgedns_traffic_nxd_hits_per_interval_summary summary
 edgedns_traffic_nxd_hits_per_interval_summary_sum{zone="edgedns.zone"} 0
 edgedns_traffic_nxd_hits_per_interval_summary_count{zone="edgedns.zone"} 1
+```
+
+#### If legacy API: Edge DNS Traffic Reporting API v1 is used
+```
+# HELP akamai_edgedns_traffic_exporter_build_info Build info with version, revision, branch, goversion
+# TYPE akamai_edgedns_traffic_exporter_build_info gauge
+akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.25.5",revision="5823bd8e196e32cc9c943a074e3a214ce92cb048",version="0.2.0"} 1
+# HELP edgedns_traffic_dns_hits_per_interval Number of DNS hits per 5 minute interval (per zone)
+# TYPE edgedns_traffic_dns_hits_per_interval gauge
+edgedns_traffic_dns_hits_per_interval{zone="edgedns.zone"} 75
+# HELP edgedns_traffic_dns_hits_per_interval_summary Number of DNS hits per 5 minute interval (per zone)
+# TYPE edgedns_traffic_dns_hits_per_interval_summary summary
+edgedns_traffic_dns_hits_per_interval_summary_sum{zone="edgedns.zone"} 158
+edgedns_traffic_dns_hits_per_interval_summary_count{zone="edgedns.zone"} 2
+# HELP edgedns_traffic_nxd_hits_per_interval Number of NXD hits per 5 minute interval (per zone)
+# TYPE edgedns_traffic_nxd_hits_per_interval gauge
+edgedns_traffic_nxd_hits_per_interval{zone="edgedns.zone"} 11
+# HELP edgedns_traffic_nxd_hits_per_interval_summary Number of NXDomain hits per 5 minute interval (per zone)
+# TYPE edgedns_traffic_nxd_hits_per_interval_summary summary
+edgedns_traffic_nxd_hits_per_interval_summary_sum{zone="edgedns.zone"} 15
+edgedns_traffic_nxd_hits_per_interval_summary_count{zone="edgedns.zone"} 2
 ```
 
 ### View the metrics using the prometheus webserver
