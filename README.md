@@ -1,6 +1,6 @@
 # akamai-edgedns-traffic-exporter
 
-The Edge DNS Prometheus Traffic Exporter Technical Preview publishes data from both the Akamai Edge DNS [authotitative-dns-traffic-by-time](https://techdocs.akamai.com/reporting/v1/reference/authoritative-dns-traffic-by-time) and [Edge DNS Traffic Reporting API v1](https://techdocs.akamai.com/developer/pdfs/edge-dns-traffic-reporting-api-v1.pdf) data as metrics. With Edge DNS metrics, Prometheus can track DNS query and NXDOMAIN traffic and trigger alerts such as NXDOMAIN spikes that exceed a thresh hold, e.g. 10x a rolling average, and might be indicative of DNS abuse or an attack.
+The Edge DNS Prometheus Traffic Exporter publishes data from both the Akamai Edge DNS [authotitative-dns-traffic-by-time](https://techdocs.akamai.com/reporting/v1/reference/authoritative-dns-traffic-by-time) and [Edge DNS Traffic Reporting API v1](https://techdocs.akamai.com/developer/pdfs/edge-dns-traffic-reporting-api-v1.pdf) data as metrics. With Edge DNS metrics, Prometheus can track DNS query and NXDOMAIN traffic and trigger alerts such as NXDOMAIN spikes that exceed a thresh hold, e.g. 10x a rolling average, and might be indicative of DNS abuse or an attack.
 
 ## Getting started
 
