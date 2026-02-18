@@ -454,4 +454,4 @@ static_configs:
 
 ## License
 
-Apache License 2.0, see [LICENSE](https://github.com/akamai/akamai-edgedns-traffic-exporter/master/LICENSE).
+Apache License 2.0, see [LICENSE](LICENSE).
