@@ -1,6 +1,6 @@
 # akamai-edgedns-traffic-exporter
 
-The Edge DNS Prometheus Traffic Exporter Technical Preview publishes Akamai Edge DNS [Traffic Report](https://developer.akamai.com/api/cloud_security/edge_dns_traffic_reporting/v1.html) data as metrics. With Edge DNS metrics, Prometheus can track DNS query and NXDOMAIN traffic and trigger alerts such as NXDOMAIN spikes that exceed a thresh hold, e.g. 10x a rolling average, and might be indicative of DNS abuse or an attack.
+The Edge DNS Prometheus Traffic Exporter publishes data from both the Akamai Edge DNS [authotitative-dns-traffic-by-time](https://techdocs.akamai.com/reporting/v1/reference/authoritative-dns-traffic-by-time) and [Edge DNS Traffic Reporting API v1](https://techdocs.akamai.com/developer/pdfs/edge-dns-traffic-reporting-api-v1.pdf) data as metrics. With Edge DNS metrics, Prometheus can track DNS query and NXDOMAIN traffic and trigger alerts such as NXDOMAIN spikes that exceed a thresh hold, e.g. 10x a rolling average, and might be indicative of DNS abuse or an attack.
 
 ## Getting started
 
@@ -13,31 +13,51 @@ The Edge DNS Prometheus Traffic Exporter Technical Preview publishes Akamai Edge
 
 * Prometheus environment with an active Alertmanager.
 * [Go environment](https://golang.org/doc/install).
-* Valid Akamai API client with authorization to use the Edge DNS Traffic Reporting API. [Akamai API Authentication](https://developer.akamai.com/getting-started/edgegrid) provides an overview and information to generate of authorization credentials to use the API.
+* Valid Akamai API client with authorization to use the Edge DNS Traffic Reporting API. [Akamai API Authentication](https://techdocs.akamai.com/developer/docs/edgegrid) provides an overview and information to generate of authorization credentials to use the API.
 
 ## Install
 
+### Download Binaries
+The fastest way to get started is to download the pre-compiled binary for your system from the [Releases](https://github.com/akamai/akamai-edgedns-traffic-exporter/releases) page. Every binary includes a .sig checksum for integrity verification.
+
+### Build from Source
+If you want to compile the package from source, you will need Go 1.24 or later installed.
+
+1. **Clone the repository:**
+
+Run the following command to clone the repository:
 ```bash
-go get -u github.com/akamai/akamai-edgedns-traffic-exporter
+git clone https://github.com/akamai/akamai-edgedns-traffic-exporter.git
 ```
 
-## Build
+2. **Choose your build method:**
+After cloning, you can generate a local binary or a Docker image.
 
-### Docker image
+### Build - Local Binary 
 
-```bash
-make docker
-```
-
-The resulting image has a name of `/akamai/akamai-edgedns-traffic-exporter-linux-amd64:<git-branch>`, has an endpoint of `/bin/akamai-edgedns-traffic-exporter`, and uses port `9801`.
-
-### Binary executable
+To compile the exporter for your current operating system and architecture:
 
 ```bash
 make build
 ```
 
-#### Test
+The resulting binary will be created in the root directory.
+
+### Docker Image
+
+```bash
+make docker
+```
+
+The resulting image is named based on your architecture:
+
+`/akamai/akamai-edgedns-traffic-exporter-linux-amd64:<git-branch>` 
+
+or 
+
+`/akamai/akamai-edgedns-traffic-exporter-linux-arm64:<git-branch>`
+
+## Test
 
 ```bash
 make test
@@ -131,20 +151,21 @@ rule_files:
 In the log, the exporter will publish a series of INFO messages to show normal operation. Look for the `Beginning to serve on address:` message to learn its port.
 
 ```
-INFO[0000] Config file: edgedns_traffic_example_config.yaml  source="main.go:328"
-INFO[0000] Starting Edge DNS Traffic exporter(version=0.1.0, branch=master, revision=84667d49203590616cd6d1b07d75715eaff31392)  source="main.go:333"
-INFO[0000] Build context(go=go1.15.6, user=jgilbert@bos-mp8o3, date=20210106-15:40:18)  source="main.go:334"
-INFO[0000] akamai_edgedns_traffic_exporter config loaded  source="main.go:450"
-INFO[0000] Edge DNS Traffic exporter start time: 2021-01-07 09:45:33.538348 +0000 UTC  source="main.go:390"
-INFO[0000] Beginning to serve on address :9801           source="main.go:422"
+INFO[2026-02-12T15:26:32+05:30] Logging level set to info                    
+INFO[2026-02-12T15:26:32+05:30] Config file: edgedns.yml                     
+INFO[2026-02-12T15:26:32+05:30] Starting Edge DNS Traffic exporter(version=0.2.0, branch=master, revision=5823bd8e196e32cc9c943a074e3a214ce92cb048) 
+INFO[2026-02-12T15:26:32+05:30] Build context(go=go1.25.5, platform=darwin/arm64, user=, date=20260212-09:55:39, tags=netgo static_build) 
+INFO[2026-02-12T15:26:32+05:30] akamai_edgedns_traffic_exporter config loaded 
+INFO[2026-02-12T15:26:32+05:30] Edge DNS Traffic exporter start time: 2026-02-12 01:56:32.407289 +0000 UTC 
+INFO[2026-02-12T15:26:32+05:30] Beginning to serve on address :9801
 ```
 
 NOTE: running the exporter without the appropriate settings to access the Edge DNS Traffic Reporting API will only publish build info like below. To validate, visit the exporter's metrics view with a browser using local host and the exporter's port known from one of the INFO startup messages (e.g. http://localhost:9801/metrics).
 
 ```
-# HELP akamai_edgedns_traffic_exporter_build_info A metric with a constant '1' value labeled by version, revision, branch, and goversion from which akamai_edgedns_traffic_exporter was built.
+# HELP akamai_edgedns_traffic_exporter_build_info Build info with version, revision, branch, goversion
 # TYPE akamai_edgedns_traffic_exporter_build_info gauge
-akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.15.6",revision="84667d49203590616cd6d1b07d75715eaff31392",version="0.1.0"} 1
+akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.25.5",revision="5823bd8e196e32cc9c943a074e3a214ce92cb048",version="0.2.0"} 1
 ```
 
 #### Command line arguments
@@ -169,15 +190,22 @@ Flags:
                           The Akamai Edgegrid client_token credential.
       --edgedns.edgegrid-access-token=EDGEDNS.EDGEGRID-ACCESS-TOKEN
                           The Akamai Edgegrid access_token credential.
+      --edgedns.use-legacy-api
+                          If specified, uses the deprecated Edge DNS Traffic Reporting API v1 instead of the authoritative-dns-traffic-by-time Reporting API.
+      --edgedns.timestamp-label
+                          Creates time series with traffic timestamp as label.
+      --edgedns.traffic-timestamp
+                          Create time series with traffic timestamp.
       --log.level="info"  Only log messages with the given severity or above. Valid levels: [debug, info, warn, error,
                           fatal]
       --log.format="logger:stderr"  
-                          Set the log target and format. Example: "logger:syslog?appname=bob&local=7" or
-                          "logger:stdout?json=true"
+                          Set the log target and format. Example: "logger:stdout?json=true"
       --version           Show application version.
 ```
 
 Note: By default, the exporter expects the configuration file to exist in the current working directory (e.g. `./edgedns.yml`).
+
+Note: By default, the exporter uses the authoritative-dns-traffic-by-time Reporting API unless the --use-legacy-api flag is specified.
 
 #### Example invocations
 
@@ -191,6 +219,12 @@ Note: By default, the exporter expects the configuration file to exist in the cu
 
 ```bash
 ./akamai-edgedns-traffic-exporter --config.file=edgedns_example_config.yml --edgedns.edgegrid-host akab-abcdefghijklmnop-01234567890aaaaa.luna.akamaiapis.net --edgedns.edgegrid-access-token example_provided_access_token --edgedns.edgegrid-client-token example_provided_client_token --edgedns.edgegrid-client-secret example_provided_client_secret
+```
+
+`Invoke exporter with a configuration file path and to use Edge DNS Traffic Reporting API v1`
+
+```bash
+./akamai-edgedns-traffic-exporter --config.file=edgedns_example_config.yml --edgedns.use-legacy-api
 ```
 
 ### Using the Docker container
@@ -248,10 +282,32 @@ and continue to collect future metric data. The dropped data will not be availab
 
 To glimpse Edge DNS Traffic metric activity in the exporter, visit the exporter's metrics web page with a browser using local host and the exporter's port known from one of the INFO startup messages (e.g. http://localhost:9801/metrics). The web page will present exporter status and metrics as follows.
 
+#### If default behaviour (authoritative-dns-traffic-by-time API) is used
 ```
-# HELP akamai_edgedns_traffic_exporter_build_info A metric with a constant '1' value labeled by version, revision, branch, and goversion from which akamai_edgedns_traffic_exporter was built.
+# HELP akamai_edgedns_traffic_exporter_build_info Build info with version, revision, branch, goversion
 # TYPE akamai_edgedns_traffic_exporter_build_info gauge
-akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.15.6",revision="84667d49203590616cd6d1b07d75715eaff31392",version="0.1.0"} 1
+akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.25.5",revision="5823bd8e196e32cc9c943a074e3a214ce92cb048",version="0.2.0"} 1
+# HELP edgedns_traffic_dns_hits_per_interval Number of DNS hits per 5 minute interval (per zone)
+# TYPE edgedns_traffic_dns_hits_per_interval gauge
+edgedns_traffic_dns_hits_per_interval{zone="edgedns.zone"} 0.0003333333333333333
+# HELP edgedns_traffic_dns_hits_per_interval_summary Number of DNS hits per 5 minute interval (per zone)
+# TYPE edgedns_traffic_dns_hits_per_interval_summary summary
+edgedns_traffic_dns_hits_per_interval_summary_sum{zone="edgedns.zone"} 0.0004777766666666667
+edgedns_traffic_dns_hits_per_interval_summary_count{zone="edgedns.zone"} 1
+# HELP edgedns_traffic_nxd_hits_per_interval Number of NXD hits per 5 minute interval (per zone)
+# TYPE edgedns_traffic_nxd_hits_per_interval gauge
+edgedns_traffic_nxd_hits_per_interval{zone="edgedns.zone"} 0
+# HELP edgedns_traffic_nxd_hits_per_interval_summary Number of NXDomain hits per 5 minute interval (per zone)
+# TYPE edgedns_traffic_nxd_hits_per_interval_summary summary
+edgedns_traffic_nxd_hits_per_interval_summary_sum{zone="edgedns.zone"} 0
+edgedns_traffic_nxd_hits_per_interval_summary_count{zone="edgedns.zone"} 1
+```
+
+#### If legacy API: Edge DNS Traffic Reporting API v1 is used
+```
+# HELP akamai_edgedns_traffic_exporter_build_info Build info with version, revision, branch, goversion
+# TYPE akamai_edgedns_traffic_exporter_build_info gauge
+akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.25.5",revision="5823bd8e196e32cc9c943a074e3a214ce92cb048",version="0.2.0"} 1
 # HELP edgedns_traffic_dns_hits_per_interval Number of DNS hits per 5 minute interval (per zone)
 # TYPE edgedns_traffic_dns_hits_per_interval gauge
 edgedns_traffic_dns_hits_per_interval{zone="edgedns.zone"} 75
@@ -273,6 +329,15 @@ edgedns_traffic_nxd_hits_per_interval_summary_count{zone="edgedns.zone"} 2
 To view the metrics in Prometheus, visit Graph and Execute a query expression for one of the metrics. As an example, the following image shows the graph for `edgedns_traffic_nxd_hits_per_interval_summary_sum`.
 
 ![Prometheus](/static/prometheus.png)
+
+## Important: Switching Between APIs
+
+When the Prometheus server is started, it creates a `/data` directory to manage its time-series database.
+
+**If you switch between the Modern and Legacy APIs, you must delete the `/data` directory.** 
+
+* The two APIs use different precision levels (Floating-point vs. Integer). Mixing this data in the same directory will disrupt your results.
+* **Warning:** Deleting the `/data` directory will result in the **permanent loss of all previously collected historical data**. Proceed with caution.
 
 ## Post Processing Metrics with recording rules
 
@@ -387,10 +452,6 @@ static_configs:
     description: Alert from {{ $labels.instance }}
 ```
 
-## Future Work
-
-* The [Akamai Edge DNS Traffic Report](https://developer.akamai.com/api/cloud_security/edge_dns_traffic_reporting/v1.html) API provides historical DNS query and NXDOMAIN traffic. Backfill time series improvements will allow loading Edge DNS past data.
-
 ## License
 
-Apache License 2.0, see [LICENSE](https://github.com/akamai/akamai-edgedns-traffic-exporter/master/LICENSE).
+Apache License 2.0, see [LICENSE](LICENSE).

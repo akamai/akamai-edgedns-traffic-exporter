@@ -11,56 +11,55 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Ensure that 'all' is the default target otherwise it will be the first target from Makefile.common.
+# Ensure that 'all' is the default target
 all::
 
-# Needs to be defined before including Makefile.common to auto-generate targets
-DOCKER_ARCHS ?= amd64 # armv7 arm64 ppc64le s390x
-DOCKER_REPO ?= akamai
-
-PROMTOOL_VERSION ?= 2.18.1
-PROMTOOL_URL     ?= https://github.com/prometheus/prometheus/releases/download/v$(PROMTOOL_VERSION)/prometheus-$(PROMTOOL_VERSION).$(GO_BUILD_PLATFORM).tar.gz
-PROMTOOL         ?= $(FIRST_GOPATH)/bin/promtool
-
+# 1. CONFIGURATION
+DOCKER_REPO             ?= akamai
 DOCKER_IMAGE_NAME       ?= akamai-edgedns-traffic-exporter
-MACH                    ?= $(shell uname -m)
+# Add any additional architectures you want to support here
+DOCKER_ARCHS            ?= amd64 arm64
 
+# Maintain your specific tool versions
+PROMTOOL_VERSION ?= 3.9.1
+PROMTOOL         ?= $(FIRST_GOPATH)/bin/promtool
+# Note: GO_BUILD_PLATFORM is provided by Makefile.common
+PROMTOOL_URL     ?= https://github.com/prometheus/prometheus/releases/download/v$(PROMTOOL_VERSION)/prometheus-$(PROMTOOL_VERSION).$(GO_BUILD_PLATFORM).tar.gz
+
+# 2. INCLUDE SHARED LOGIC
 include Makefile.common
 
-STATICCHECK_IGNORE =
+# 3. DOCKER OVERRIDES (Using buildx to avoid warnings)
+.PHONY: buildx-docker
+buildx-docker: $(addprefix buildx-docker-,$(DOCKER_ARCHS))
 
-# Use CGO for non-Linux builds.
-ifeq ($(GOOS), linux)
-	PROMU_CONF ?= .promu.yml
-else
-	ifndef GOOS
-		ifeq ($(GOHOSTOS), linux)
-			PROMU_CONF ?= .promu.yml
-		else
-			PROMU_CONF ?= .promu-cgo.yml
-		endif
-	else
-		# Do not use CGO for openbsd/amd64 builds
-		ifeq ($(GOOS), openbsd)
-			ifeq ($(GOARCH), amd64)
-				PROMU_CONF ?= .promu.yml
-			else
-				PROMU_CONF ?= .promu-cgo.yml
-			endif
-		else
-			PROMU_CONF ?= .promu-cgo.yml
-		endif
-	endif
-endif
+$(addprefix buildx-docker-,$(DOCKER_ARCHS)): buildx-docker-%:
+	@echo ">> building for linux/$* using modern buildx"
+	docker buildx build \
+		--platform "linux/$*" \
+		-t "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-$*:$(SANITIZED_DOCKER_IMAGE_TAG)" \
+		-f Dockerfile \
+		--build-arg ARCH="$*" \
+		--build-arg OS="linux" \
+		--load \
+		$(DOCKERBUILD_CONTEXT)
 
-PROMU := $(FIRST_GOPATH)/bin/promu --config $(PROMU_CONF)
+# Local convenience target (keeps your original workflow)
+.PHONY: docker
+docker:
+	@echo ">> building docker image for linux/$(GOHOSTARCH) using buildx"
+	docker buildx build \
+		--platform "linux/$(GOHOSTARCH)" \
+		-t "$(DOCKER_REPO)/$(DOCKER_IMAGE_NAME)-linux-$(GOHOSTARCH):$(SANITIZED_DOCKER_IMAGE_TAG)" \
+		-f ./Dockerfile \
+		--build-arg ARCH=$(GOHOSTARCH) \
+		--build-arg OS="linux" \
+		--load \
+		./
 
-# 64bit -> 32bit mapping for cross-checking. At least for amd64/386, the 64bit CPU can execute 32bit code but not the other way around, so we don't support cross-testing upwards.
-
-# By default, "cross" test with ourselves to cover unknown pairings.
-$(eval $(call goarch_pair,amd64,386))
-$(eval $(call goarch_pair,mips64,mips))
-$(eval $(call goarch_pair,mips64el,mipsel))
+# 4. CUSTOM TARGETS & WRAPPERS
+.PHONY: build
+build: common-build
 
 .PHONY: all
 all:: precheck style check_license lint build
@@ -73,5 +72,6 @@ unused:
 promtool: $(PROMTOOL)
 
 $(PROMTOOL):
+	@echo ">> downloading promtool v$(PROMTOOL_VERSION)"
 	mkdir -p $(FIRST_GOPATH)/bin
 	curl -fsS -L $(PROMTOOL_URL) | tar -xvzf - -C $(FIRST_GOPATH)/bin --no-anchored --strip 1 promtool

@@ -1,11 +1,19 @@
-FROM golang:1.14 as builder
-WORKDIR /go/src/github.com/akamai/akamai-edgedns-traffic-exporter
+# syntax=docker/dockerfile:1
+FROM --platform=$BUILDPLATFORM golang:1.24 AS builder
+
+ARG ARCH
+ARG OS
+
+RUN apt-get update && apt-get install -y make git ca-certificates
+
+WORKDIR /app
 COPY . .
-RUN make build
 
-FROM quay.io/prometheus/busybox:latest AS app
+RUN CGO_ENABLED=0 GOOS=${OS} GOARCH=${ARCH} make build
 
-COPY --from=builder /go/src/github.com/akamai/akamai-edgedns-traffic-exporter/akamai-edgedns-traffic-exporter /bin/akamai-edgedns-traffic-exporter
+FROM busybox:latest AS app
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /app/akamai-edgedns-traffic-exporter /bin/akamai-edgedns-traffic-exporter
 
 EXPOSE 9801
 ENTRYPOINT ["/bin/akamai-edgedns-traffic-exporter"]
