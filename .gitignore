@@ -1,3 +1,13 @@
 vendor/
 akamai-dns
 build/
+akamai-edgedns-traffic-exporter
+edgedns.yml
+prometheus.yml
+/data
+.edgerc
+.DS_Store
+*.env
+edgedns.yml
+test.rules
+build/
