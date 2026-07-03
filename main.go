@@ -32,7 +32,7 @@ import (
 	"strings"
 	"time"
 
-	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
+	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v13/pkg/edgegrid"
 	"gopkg.in/yaml.v3"
 )
 
