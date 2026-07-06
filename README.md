@@ -21,7 +21,7 @@ The Edge DNS Prometheus Traffic Exporter publishes data from both the Akamai Edg
 The fastest way to get started is to download the pre-compiled binary for your system from the [Releases](https://github.com/akamai/akamai-edgedns-traffic-exporter/releases) page. Every binary includes a .sig checksum for integrity verification.
 
 ### Build from Source
-If you want to compile the package from source, you will need Go 1.24 or later installed.
+If you want to compile the package from source, you will need Go 1.26.4 or later installed.
 
 1. **Clone the repository:**
 
@@ -153,7 +153,7 @@ In the log, the exporter will publish a series of INFO messages to show normal o
 ```
 INFO[2026-02-12T15:26:32+05:30] Logging level set to info                    
 INFO[2026-02-12T15:26:32+05:30] Config file: edgedns.yml                     
-INFO[2026-02-12T15:26:32+05:30] Starting Edge DNS Traffic exporter(version=0.2.0, branch=master, revision=5823bd8e196e32cc9c943a074e3a214ce92cb048) 
+INFO[2026-02-12T15:26:32+05:30] Starting Edge DNS Traffic exporter(version=0.3.0, branch=master, revision=5823bd8e196e32cc9c943a074e3a214ce92cb048) 
 INFO[2026-02-12T15:26:32+05:30] Build context(go=go1.25.5, platform=darwin/arm64, user=, date=20260212-09:55:39, tags=netgo static_build) 
 INFO[2026-02-12T15:26:32+05:30] akamai_edgedns_traffic_exporter config loaded 
 INFO[2026-02-12T15:26:32+05:30] Edge DNS Traffic exporter start time: 2026-02-12 01:56:32.407289 +0000 UTC 
@@ -165,7 +165,7 @@ NOTE: running the exporter without the appropriate settings to access the Edge D
 ```
 # HELP akamai_edgedns_traffic_exporter_build_info Build info with version, revision, branch, goversion
 # TYPE akamai_edgedns_traffic_exporter_build_info gauge
-akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.25.5",revision="5823bd8e196e32cc9c943a074e3a214ce92cb048",version="0.2.0"} 1
+akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.25.5",revision="5823bd8e196e32cc9c943a074e3a214ce92cb048",version="0.3.0"} 1
 ```
 
 #### Command line arguments
@@ -286,7 +286,7 @@ To glimpse Edge DNS Traffic metric activity in the exporter, visit the exporter'
 ```
 # HELP akamai_edgedns_traffic_exporter_build_info Build info with version, revision, branch, goversion
 # TYPE akamai_edgedns_traffic_exporter_build_info gauge
-akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.25.5",revision="5823bd8e196e32cc9c943a074e3a214ce92cb048",version="0.2.0"} 1
+akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.25.5",revision="5823bd8e196e32cc9c943a074e3a214ce92cb048",version="0.3.0"} 1
 # HELP edgedns_traffic_dns_hits_per_interval Number of DNS hits per 5 minute interval (per zone)
 # TYPE edgedns_traffic_dns_hits_per_interval gauge
 edgedns_traffic_dns_hits_per_interval{zone="edgedns.zone"} 0.0003333333333333333
@@ -307,7 +307,7 @@ edgedns_traffic_nxd_hits_per_interval_summary_count{zone="edgedns.zone"} 1
 ```
 # HELP akamai_edgedns_traffic_exporter_build_info Build info with version, revision, branch, goversion
 # TYPE akamai_edgedns_traffic_exporter_build_info gauge
-akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.25.5",revision="5823bd8e196e32cc9c943a074e3a214ce92cb048",version="0.2.0"} 1
+akamai_edgedns_traffic_exporter_build_info{branch="master",goversion="go1.25.5",revision="5823bd8e196e32cc9c943a074e3a214ce92cb048",version="0.3.0"} 1
 # HELP edgedns_traffic_dns_hits_per_interval Number of DNS hits per 5 minute interval (per zone)
 # TYPE edgedns_traffic_dns_hits_per_interval gauge
 edgedns_traffic_dns_hits_per_interval{zone="edgedns.zone"} 75
