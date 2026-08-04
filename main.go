@@ -32,7 +32,7 @@ import (
 	"strings"
 	"time"
 
-	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
+	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v13/pkg/edgegrid"
 	"gopkg.in/yaml.v3"
 )
 
@@ -562,7 +562,7 @@ func loadConfigContent(configData []byte) (EdgednsTrafficConfig, error) {
 
 func fileExists(filename string) bool {
 	info, err := os.Stat(filename)
-	if os.IsNotExist(err) {
+	if err != nil {
 		return false
 	}
 	return !info.IsDir()

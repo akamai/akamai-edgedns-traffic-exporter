@@ -1,3 +1,11 @@
+## 0.3.0 / 2026-07
+* Upgraded the exporter to use Akamai Edgegrid v13
+* Updated Go version to 1.26.5
+* Upgraded the exporter to use latest Prometheus Go libraries
+* Updated Prometheus dependencies (client_golang v1.23.2, common v0.70.0)
+* Updated golang.org/x dependencies (net v0.57.0, sys v0.47.0)
+* Updated project license file
+
 ## 0.2.0 / 2026-02
 * Upgraded the plugin to use Akamai Edgegrid v12
 * Upgraded the plugin to use latest Prometheus Go libraries

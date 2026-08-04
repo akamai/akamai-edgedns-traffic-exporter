@@ -29,9 +29,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	dns "github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/dns"
-	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/edgegrid"
-	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v12/pkg/session"
+	dns "github.com/akamai/AkamaiOPEN-edgegrid-golang/v13/pkg/dns"
+	edgegrid "github.com/akamai/AkamaiOPEN-edgegrid-golang/v13/pkg/edgegrid"
+	"github.com/akamai/AkamaiOPEN-edgegrid-golang/v13/pkg/session"
 )
 
 const (
